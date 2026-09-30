@@ -155,6 +155,11 @@ proc is_lambda(self: Parser): bool =
                     # compile time problems are not problems
                     # And lParen tokens are common enough that it
                     # shouldn't be too significant of a problem
+
+                    # To improve this I changed it so that
+                    # it checks only if ANY of the possible tokens
+                    # in a type hint are present, so earlier exits
+                    # are possible and it may be slightly more efficient
                     pos += 1
                     while pos < len(self.tokens):
                         case self.tokens[pos].kind:
