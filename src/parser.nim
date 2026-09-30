@@ -341,7 +341,6 @@ proc parse_primary(self: Parser): Node =
         of TokenType.lParen:
             # () - grouping/lambda
             if self.is_lambda():
-                echo "+ lambda check"
                 # () => {}
                 discard self.advance()
                 let params = self.parse_params()
@@ -360,7 +359,6 @@ proc parse_primary(self: Parser): Node =
                     lambdaHint = kind
                 )
             # (x)
-            echo "group"
             discard self.advance()
             let expression = self.parse_expression()
             discard self.expect(TokenType.rParen)
@@ -448,14 +446,11 @@ proc parse_primary(self: Parser): Node =
 proc parse_call_or_access(self: Parser): Node =
     ## Parse a call or member access (function calls, indexes and dot notation).
     let start = self.current
-    echo "start: " & $start
     var expression = self.parse_primary()
 
     while true:
-        echo "curr: " & $self.current
         case self.current.kind:
             of TokenType.lParen:
-                echo "functionc all"
                 # Function call
                 discard self.advance()
                 let args = self.parse_args()
@@ -463,7 +458,6 @@ proc parse_call_or_access(self: Parser): Node =
                 expression = node(start, self.peek(-1), NodeKind.functionCall, callCallee = expression, callArgs = args)
 
             of TokenType.lBracket:
-                echo "index access"
                 # Index access
                 discard self.advance()
                 var isSlice = false
@@ -500,12 +494,10 @@ proc parse_call_or_access(self: Parser): Node =
 
             of TokenType.dot:
                 # Member access
-                echo "memberaccess"
                 discard self.advance()
                 let member = self.parse_expression()
                 expression = node(start, self.peek(-1), NodeKind.memberAccess, accessObj = expression, accessMember = member)
             else:
-                echo "expr"
                 return expression
 
 proc parse_postfix(self: Parser): Node =
