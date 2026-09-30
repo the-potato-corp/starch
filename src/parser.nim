@@ -333,7 +333,8 @@ proc parse_primary(self: Parser): Node =
             # and if it's a right brace it's a one-item set.
             if self.current.kind == TokenType.rBrace:
                 # Empty dict
-                return node(token, self.advance(), NodeKind.dictLiteral, dictPairs = @[])
+                discard self.advance()
+                return node(token, self.peek(-1), NodeKind.dictLiteral, dictPairs = @[])
 
             let first = self.parse_expression()
             case self.current.kind:
