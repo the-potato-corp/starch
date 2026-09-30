@@ -1,5 +1,4 @@
 import std/algorithm
-import std/sets
 import std/strformat
 import std/strutils
 import errors
@@ -210,7 +209,7 @@ proc parse_params(self: Parser): seq[Node] =
             discard self.advance()
             default = self.parse_expression()
         params.add(node(name, self.peek(-1), NodeKind.parameter,
-            paramName = name.value.strVal,
+            paramName = node(name, name, NodeKind.identifier, name = name.value.strVal),
             paramHint = hint,
             paramDefault = default))
 
@@ -226,25 +225,6 @@ proc parse_args(self: Parser): seq[Node] =
         if self.current.kind == TokenType.comma:
             discard self.advance()
     return args
-
-proc findIdentifiers*(self: Parser, node: Node): HashSet[string] =
-    case node.kind:
-        of NodeKind.identifier:
-            result = toHashSet([node.name])
-        of NodeKind.binaryOp:
-            result = self.findIdentifiers(node.binaryLeft) + self.findIdentifiers(node.binaryRight)
-        of NodeKind.unaryOp:
-            result = self.findIdentifiers(node.unaryOperand)
-        of NodeKind.functionCall:
-            result = self.findIdentifiers(node.callCallee)
-            for arg in node.callArgs:
-                result = result + self.findIdentifiers(arg)
-        of NodeKind.memberAccess:
-            result = self.findIdentifiers(node.accessMember)
-        of NodeKind.literal:
-            result = initHashSet[string]()
-        else:
-            return initHashSet[string]()
 
 proc parse_primary(self: Parser): Node =
     ## Parse a primary expression (literals, identifiers, groups and lambdas).
@@ -654,7 +634,8 @@ proc parse_var_decl(self: Parser): Node =
 proc parse_derive(self: Parser): Node =
     ## Parse a derive statement.
     let token = self.expect(TokenType.derive)
-    let name = self.expect(TokenType.ident).value.strVal
+    let ident = self.expect(TokenType.ident)
+    let name = node(ident, ident, NodeKind.identifier, name = ident.value.strVal)
     var hint: Node = nil
 
     if self.current.kind == TokenType.colon:
@@ -665,12 +646,10 @@ proc parse_derive(self: Parser): Node =
     let value = self.parse_expression()
     self.terminate()
 
-    let dependencies = self.find_identifiers(value)
     return node(token, self.peek(-1), NodeKind.derivedVariable,
         derivedName = name,
         derivedHint = hint,
-        derivedValue = value,
-        derivedDependencies = dependencies
+        derivedValue = value
     )
 
 proc parse_if(self: Parser): Node =
@@ -719,14 +698,16 @@ proc parse_for(self: Parser): Node =
 proc parse_watch(self: Parser): Node =
     ## Parse a watch statement.
     let token = self.expect(TokenType.watch)
-    let identifier = self.expect(TokenType.ident).value.strVal
+    let ident = self.expect(TokenType.ident)
+    let target = node(ident, ident, NodeKind.identifier, name = ident.value.strVal)
     let body = self.parse_block()
-    return node(token, self.peek(-1), NodeKind.watchStatement, watchTarget = identifier, watchBody = body)
+    return node(token, self.peek(-1), NodeKind.watchStatement, watchTarget = target, watchBody = body)
 
 proc parse_function(self: Parser): Node =
     ## Parse a function declaration.
     let token = self.expect(TokenType.function)
-    let name = self.expect(TokenType.ident).value.strVal
+    let ident = self.expect(TokenType.ident)
+    let name = node(ident, ident, NodeKind.identifier, name = ident.value.strVal)
     discard self.expect(TokenType.lParen)
     let params = self.parse_params()
     discard self.expect(TokenType.rParen)
@@ -742,12 +723,14 @@ proc parse_function(self: Parser): Node =
 proc parse_class(self: Parser): Node =
     ## Parse a class declaration.
     let token = self.expect(TokenType.class)
-    let name = self.expect(TokenType.ident).value.strVal
-    var parent: string = ""
+    let name_ident = self.expect(TokenType.ident)
+    let name = node(name_ident, name_ident, NodeKind.identifier, name = name_ident.value.strVal)
+    var parent: Node = nil
 
     if self.current.kind == TokenType.is:
         discard self.advance()
-        parent = self.expect(TokenType.ident).value.strVal
+        let parent_ident = self.expect(TokenType.ident)
+        parent = node(parent_ident, parent_ident, NodeKind.identifier, name = parent_ident.value.strVal)
 
     var fields, methods, overrides, watchers, derivatives: seq[Node] = @[]
     for statement in self.parse_block():
@@ -837,7 +820,7 @@ proc parse_try(self: Parser): Node =
     ## Parse a try-catch block.
     let token = self.expect(TokenType.try)
     let body = self.parse_block()
-    var catches: seq[tuple[kind: Node, variable: string, body: seq[Node]]] = @[]
+    var catches: seq[tuple[kind: Node, variable: Node, body: seq[Node]]] = @[]
     var finalBody: seq[Node] = @[]
 
     while self.current.kind == TokenType.catch:
@@ -846,16 +829,18 @@ proc parse_try(self: Parser): Node =
             of TokenType.lBrace:
                 # catch {}
                 let body = self.parse_block()
-                catches.add((kind: nil, variable: "", body: body))
+                catches.add((kind: nil, variable: nil, body: body))
             of TokenType.ident:
                 # catch Exception {}
                 # catch Exception as e {}
                 let token = self.advance()
                 let kind = node(token, token, NodeKind.identifier, name = token.value.strVal)
-                var variable = ""
+
+                var variable: Node = nil
                 if self.current.kind == TokenType.as:
                     discard self.advance()
-                    variable = self.advance().value.strVal
+                    let ident = self.advance()
+                    variable = node(ident, ident, NodeKind.identifier, name = ident.value.strVal)
 
                 let body = self.parse_block()
                 catches.add((kind: kind, variable: variable, body: body))

@@ -1,7 +1,5 @@
-import std/algorithm
 import std/macros
 import std/sequtils
-import std/sets
 import lexer
 import tokens
 
@@ -27,7 +25,7 @@ type
 
         case kind*: NodeKind
         of NodeKind.parameter:
-            paramName*: string
+            paramName*: Node
             paramHint*: Node
             paramDefault*: Node
 
@@ -38,10 +36,9 @@ type
             varMutable*: bool
 
         of NodeKind.derivedVariable:
-            derivedName*: string
+            derivedName*: Node
             derivedHint*: Node
             derivedValue*: Node
-            derivedDependencies*: HashSet[string]
 
         of NodeKind.literal:
             case literalKind*: LiteralKind:
@@ -109,7 +106,7 @@ type
             forBody*: seq[Node]
 
         of NodeKind.watchStatement:
-            watchTarget*: string
+            watchTarget*: Node
             watchBody*: seq[Node]
 
         of NodeKind.assign:
@@ -118,7 +115,7 @@ type
             assignValue*: Node
 
         of NodeKind.functionDeclaration:
-            funcName*: string
+            funcName*: Node
             funcParams*: seq[Node]
             funcReturnKind*: Node
             funcBody*: seq[Node]
@@ -129,12 +126,12 @@ type
 
         of NodeKind.tryStatement:
             tryBody*: seq[Node]
-            tryCatches*: seq[tuple[kind: Node, variable: string, body: seq[Node]]]
+            tryCatches*: seq[tuple[kind: Node, variable: Node, body: seq[Node]]]
             tryFinallyBody*: seq[Node]
 
         of NodeKind.classDeclaration:
-            className*: string
-            classParent*: string
+            className*: Node
+            classParent*: Node
             classFields*: seq[Node]
             classMethods*: seq[Node]
             classWatchers*: seq[Node]
@@ -232,7 +229,7 @@ proc treeRepr(node: Node, prefix: string, isLast: bool): string =
 
     case node.kind:
     of NodeKind.parameter:
-        result = header & "parameter: " & node.paramName & "\n"
+        result = header & "parameter: " & node.paramName.name & "\n"
         if node.paramHint   != nil: result &= treeRepr(node.paramHint,    p, node.paramDefault == nil)
         if node.paramDefault != nil: result &= treeRepr(node.paramDefault, p, true)
 
@@ -243,11 +240,9 @@ proc treeRepr(node: Node, prefix: string, isLast: bool): string =
         if node.varValue != nil: result &= treeRepr(node.varValue, p, true)
 
     of NodeKind.derivedVariable:
-        result = header & "derived: " & node.derivedName & "\n"
-        if node.derivedHint  != nil: result &= treeRepr(node.derivedHint,  p, node.derivedValue == nil and node.derivedDependencies.len == 0)
-        if node.derivedValue != nil: result &= treeRepr(node.derivedValue, p, node.derivedDependencies.len == 0)
-        if node.derivedDependencies.len > 0:
-            result &= childSeqStr("dependencies", node.derivedDependencies.toSeq().sorted(), p, true)
+        result = header & "derived: " & node.derivedName.name & "\n"
+        if node.derivedHint  != nil: result &= treeRepr(node.derivedHint,  p, node.derivedValue == nil)
+        if node.derivedValue != nil: result &= treeRepr(node.derivedValue, p, true)
 
     of NodeKind.literal:
         result = header & "literal: " & (case node.literalKind
@@ -344,7 +339,8 @@ proc treeRepr(node: Node, prefix: string, isLast: bool): string =
         result &= childNodes(node.forBody, p)
 
     of NodeKind.watchStatement:
-        result = header & "watch: " & node.watchTarget & "\n"
+        result = header & "watch" & "\n"
+        result &= treeRepr(node.watchTarget, p, false)
         result &= childNodes(node.watchBody, p)
 
     of NodeKind.assign:
@@ -353,7 +349,7 @@ proc treeRepr(node: Node, prefix: string, isLast: bool): string =
         result &= treeRepr(node.assignValue,    p, true)
 
     of NodeKind.functionDeclaration:
-        result = header & "func: " & node.funcName & "\n"
+        result = header & "func: " & node.funcName.name & "\n"
         let hasReturn = node.funcReturnKind != nil
         let hasBody   = node.funcBody.len > 0
         for i, param in node.funcParams:
@@ -383,7 +379,7 @@ proc treeRepr(node: Node, prefix: string, isLast: bool): string =
             let last  = i == node.tryCatches.high and node.tryFinallyBody.len == 0
             let cconn = if last: "└── " else: "├── "
             let cp2   = if last: "    " else: "│   "
-            result &= p & cconn & "catch" & (if c.variable != "": ": " & c.variable else: "") & "\n"
+            result &= p & cconn & "catch" & (if c.variable != nil: ": " & c.variable.name else: "") & "\n"
             if c.kind != nil: result &= treeRepr(c.kind, p & cp2, c.body.len == 0)
             result &= childNodes(c.body, p & cp2)
         if node.tryFinallyBody.len > 0:
@@ -473,9 +469,9 @@ proc treeRepr(node: Node, prefix: string, isLast: bool): string =
         result &= treeRepr(node.genericKind, p, node.typeArgs.len == 0)
         result &= childNodes(node.typeArgs, p)
 
-    of NodeKind.break:    result = header & "break\n"
-    of NodeKind.continue: result = header & "continue\n"
-    of NodeKind.null:     result = header & "null\n"
+    # of NodeKind.break:    result = header & "break\n"
+    # of NodeKind.continue: result = header & "continue\n"
+    # of NodeKind.null:     result = header & "null\n"
     of NodeKind.setLiteral:
         result = header & "set\n" & childNodes(node.setItems, p)
     of NodeKind.tupleLiteral:
