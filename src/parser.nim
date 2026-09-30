@@ -936,8 +936,9 @@ proc parse_expression_statement(self: Parser): Node =
 
     if self.current.kind == TokenType.assign:
         if not (expression.kind in {
-            NodeKind.identifier,   # bar = baz
+            NodeKind.identifier,   # foo = bar
             NodeKind.memberAccess, # foo.bar = baz
+            NodeKind.indexAccess,  # foo[0] = bar
             NodeKind.listLiteral,  # [foo, bar] = baz
             NodeKind.dictLiteral,  # {foo: bar} = baz
             NodeKind.setLiteral    # {foo, bar} = baz
@@ -961,7 +962,7 @@ proc parse_expression_statement(self: Parser): Node =
         TokenType.starAssign,
         TokenType.slashAssign
     }:
-        if not (expression.kind in {NodeKind.identifier, NodeKind.memberAccess}):
+        if not (expression.kind in {NodeKind.identifier, NodeKind.memberAccess, NodeKind.indexAccess}):
             raise self.error(StarchSyntaxError, "invalid assignment target")
 
         let operator = case self.advance().kind:
