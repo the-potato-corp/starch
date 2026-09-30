@@ -1,8 +1,987 @@
+// ============================================================
+// STARCH PARSER STRESS TEST
+// ============================================================
+
+// ------------------------------------------------------------
+// Imports
+// ------------------------------------------------------------
+
+using foo;
+using foo as bar;
+using foo, bar, baz;
+using foo, bar, baz as qux;
+
+using thing, other from module;
+
+
+// ------------------------------------------------------------
+// Literals
+// ------------------------------------------------------------
+
+var decimal = 123;
+var decimalUnderscore = 1_000_000;
+
+var hexadecimal = 0xDEAD_BEEF;
+var octal = 0o755;
+var binary = 0b1010_1010;
+
+var float1 = 123.456;
+var float2 = 1_000.000_001;
+var float3 = 1.5e10;
+var float4 = 1.5e-10;
+var float5 = 1e+10;
+var float6 = .5;
+
+var string1 = "hello";
+var string2 = "hello\nworld\t!";
+var string3 = "escaped \\ quote";
+var string4 = “smart quotes”;
+
+// Multiline template.
+var template1 = `
+    hello world
+    this is a multiline template
+`;
+
+// Template interpolation.
+var template2 = `hello ${name}`;
+var template3 = `x = ${x + 1}`;
+var template4 = `
+    value = ${foo.bar[0]}
+    result = ${a + b * c}
+`;
+
+// Booleans / null.
+var trueValue = true;
+var falseValue = false;
+var nullValue = null;
+
+
+// ------------------------------------------------------------
+// Collections
+// ------------------------------------------------------------
+
+// Empty collections.
+var emptyList = [];
+var emptyDict = {};
+var emptySet = {1};
+
+// Lists.
+var list1 = [1];
+var list2 = [1, 2, 3];
+var list3 = [1, "two", true, null, [4, 5]];
+
+var nestedList = [
+    [1, 2],
+    [3, 4],
+    [5, [6, [7, [8]]]]
+];
+
+// Trailing comma.
+var trailingList = [
+    1,
+    2,
+    3,
+];
+
+// Sets.
+var set1 = {1, 2, 3};
+var set2 = {
+    1,
+    2,
+    3,
+};
+
+var trailingSet = {
+    "a",
+    "b",
+    "c",
+};
+
+// Dictionaries.
+var dict1 = {
+    "name": "John",
+    "age": 42,
+};
+
+var dict2 = {
+    "nested": {
+        "value": 123,
+    },
+    "list": [1, 2, 3],
+    "empty": {},
+};
+
+var dict3 = {
+    1: "one",
+    2: "two",
+    3: "three",
+};
+
+
+// ------------------------------------------------------------
+// Variable declarations
+// ------------------------------------------------------------
+
+var x;
+var y = 123;
+
+const immutable = 42;
+const greeting: string = "hello";
+
+var inferred = 123;
+var explicitlyTyped: int = 123;
+
+var optionalValue: string? = null;
+
+var unionValue: string | int = 123;
+
+var genericList: List[int] = [1, 2, 3];
+
+var nestedGeneric: Map[string, List[int]] = {};
+
+var complicatedType: Result[List[string], Error]? = null;
+
+
+// ------------------------------------------------------------
+// Destructuring declarations
+// ------------------------------------------------------------
+
+var [a, b] = [1, 2];
+
+var [first, second, third] = values;
+
+var {
+    key: value
+} = object;
+
+var {
+    "name": name,
+    "age": age,
+} = person;
+
+var {
+    x,
+    y,
+} = coordinates;
+
+
+// ------------------------------------------------------------
+// Derived variables
+// ------------------------------------------------------------
+
+derive doubled = x * 2;
+
+derive answer: int = 42;
+
+derive complicated: string | int = foo.bar;
+
+
+// ------------------------------------------------------------
+// Identifiers and member access
+// ------------------------------------------------------------
+
+var a1 = foo;
+var a2 = foo.bar;
+var a3 = foo.bar.baz;
+var a4 = foo.bar.baz.qux;
+
+var a5 = foo[0];
+var a6 = foo[0][1];
+var a7 = foo[0].bar;
+var a8 = foo.bar[0].baz[1];
+
+var a9 = foo().bar();
+var a10 = foo(1)(2)(3);
+
+var deeplyChained = foo
+    .bar
+    [0]
+    .baz
+    [1]
+    .qux();
+
+
+// ------------------------------------------------------------
+// Function calls
+// ------------------------------------------------------------
+
+foo();
+foo(1);
+foo(1, 2);
+foo(1, 2, 3,);
+
+foo(
+    1,
+    2,
+    3,
+);
+
+outer(inner(1, 2), other(3, 4));
+
+object.method(
+    foo(),
+    bar.baz,
+    [1, 2, 3],
+);
+
+
+// ------------------------------------------------------------
+// Indexing
+// ------------------------------------------------------------
+
+var index0 = list[0];
+var index1 = matrix[1][2];
+var index2 = object["name"];
+var index3 = foo.bar[baz];
+
+var dynamicIndex = values[index];
+
+
+// ------------------------------------------------------------
+// Slices
+// ------------------------------------------------------------
+
+var slice1 = values[1:5];
+var slice2 = values[:5];
+var slice3 = values[1:];
+var slice4 = values[1:5:2];
+var slice5 = values[:5:2];
+var slice6 = values[1::2];
+
+var slice7 = values[
+    start:
+    stop
+];
+
+
+// ------------------------------------------------------------
+// Unary operators
+// ------------------------------------------------------------
+
+var negative = -x;
+var doubleNegative = --x;
+var notValue = !value;
+
+var unaryNested = !-!x;
+
+var awaited = await future;
+var yielded = yield value;
+
+var unaryCall = -foo();
+var unaryIndex = !values[0];
+
+
+// ------------------------------------------------------------
+// Arithmetic
+// ------------------------------------------------------------
+
+var arithmetic1 = 1 + 2;
+var arithmetic2 = 1 - 2;
+var arithmetic3 = 2 * 3;
+var arithmetic4 = 8 / 2;
+var arithmetic5 = 10 % 3;
+
+var arithmetic6 = 1 + 2 * 3;
+var arithmetic7 = (1 + 2) * 3;
+var arithmetic8 = 2 ^ 3;
+var arithmetic9 = 2 ^ 3 ^ 4;
+
+var arithmetic10 = -2 ^ 3;
+var arithmetic11 = -(2 ^ 3);
+var arithmetic12 = (-2) ^ 3;
+
+
+// ------------------------------------------------------------
+// Range / concatenation
+// ------------------------------------------------------------
+
+var range1 = 1..10;
+var range2 = start..end;
+
+var concat1 = "hello" ~ "world";
+var concat2 = a ~ b ~ c;
+
+var rangeConcat = 1..10 ~ 20..30;
+
+
+// ------------------------------------------------------------
+// Comparisons
+// ------------------------------------------------------------
+
+var cmp1 = a < b;
+var cmp2 = a <= b;
+var cmp3 = a > b;
+var cmp4 = a >= b;
+
+var cmp5 = a == b;
+var cmp6 = a != b;
+var cmp7 = a ≈ b;
+
+var cmp8 = a is b;
+var cmp9 = a is not b;
+
+var cmp10 = a in collection;
+var cmp11 = a not in collection;
+
+var comparisonChain = a < b < c;
+var comparisonMixed = a == b is c;
+
+
+// ------------------------------------------------------------
+// Logical operators
+// ------------------------------------------------------------
+
+var logic1 = a && b;
+var logic2 = a || b;
+
+var logic3 = a && b || c;
+var logic4 = a || b && c;
+
+var logic5 = !(a && b);
+var logic6 = !a || !b;
+
+
+// ------------------------------------------------------------
+// Ternary
+// ------------------------------------------------------------
+
+var ternary1 = condition ? a : b;
+
+var ternary2 =
+    condition
+        ? trueValue
+        : falseValue;
+
+var ternaryNested =
+    a
+        ? b
+        : c
+            ? d
+            : e;
+
+var ternaryComplex =
+    a > b && c < d
+        ? foo(bar)
+        : baz(qux);
+
+
+// ------------------------------------------------------------
+// Pipeline
+// ------------------------------------------------------------
+
+var pipeline1 = value ~> foo;
+var pipeline2 = value ~> foo ~> bar;
+
+var pipeline3 =
+    value
+    ~> transform
+    ~> filter
+    ~> collect;
+
+var pipeline4 =
+    data
+    ~> map(fn)
+    ~> filter(predicate)
+    ~> reduce(accumulator);
+
+
+// ------------------------------------------------------------
+// Operator precedence stress
+// ------------------------------------------------------------
+
+var precedence1 = a + b * c;
+var precedence2 = a * b + c;
+var precedence3 = a + b * c ^ d;
+var precedence4 = a..b ~ c + d * e;
+var precedence5 = a < b && c == d || e;
+var precedence6 = a ? b : c ? d : e;
+var precedence7 = a ~> b ? c : d;
+var precedence8 = -a * b + c;
+var precedence9 = !a && b || c;
+
+
+// ------------------------------------------------------------
+// Assignments
+// ------------------------------------------------------------
+
+x = 1;
+foo.bar = 2;
+foo[0] = 3;
+
+x += 1;
+x -= 2;
+x *= 3;
+x /= 4;
+
+object.value += delta;
+array[index] -= amount;
+
+foo().bar = value;
+
+
+// ------------------------------------------------------------
+// Expression statements
+// ------------------------------------------------------------
+
+foo();
+
+bar.baz();
+
+object.method(arg1, arg2);
+
+1 + 2;
+foo + bar * baz;
+
+someFunction(
+    nestedFunction(
+        value
+    )
+);
+
+
+// ------------------------------------------------------------
+// ++ / -- tokenization
+// ------------------------------------------------------------
+
+x++;
+x--;
+
+foo++;
+foo.bar--;
+
+
+// ------------------------------------------------------------
+// Functions
+// ------------------------------------------------------------
+
+function empty() {
+}
+
+function noParams() {
+    return;
+}
+
+function oneParam(x) {
+    return x;
+}
+
+function typedParam(x: int) {
+    return x;
+}
+
+function defaultParam(x or 123) {
+    return x;
+}
+
+function typedDefault(x: int or 123) {
+    return x;
+}
+
+function manyParams(
+    a,
+    b: int,
+    c or "hello",
+    d: string or "world",
+) {
+    return a;
+}
+
+function returnsValue(x: int) -> int {
+    return x * 2;
+}
+
+function complexFunction(
+    input: List[int],
+    fallback: string or "none",
+) -> Result[string, Error]? {
+    if input {
+        return "ok";
+    }
+
+    return null;
+}
+
+
+// ------------------------------------------------------------
+// Lambdas
+// ------------------------------------------------------------
+
+var lambda0 = () => {
+    return 42;
+};
+
+var lambda1 = (x) => {
+    return x;
+};
+
+var lambda2 = (x, y) => {
+    return x + y;
+};
+
+var lambda3 = (
+    x: int,
+    y: int or 10,
+) -> int {
+    return x + y;
+};
+
+var lambdaNested = (x) => {
+    return (y) => {
+        return x + y;
+    };
+};
+
+var lambdaCall = ((x) => {
+    return x * 2;
+})(10);
+
+
+// ------------------------------------------------------------
+// If / elif / else
+// ------------------------------------------------------------
+
+if true {
+    foo();
+}
+
+if condition {
+    foo();
+} else {
+    bar();
+}
+
+if a {
+    foo();
+} elif b {
+    bar();
+} elif c {
+    baz();
+} else {
+    qux();
+}
+
+if a && b || c {
+    if nested {
+        foo();
+    } else {
+        bar();
+    }
+} elif fallback {
+    baz();
+}
+
+
+// ------------------------------------------------------------
+// While
+// ------------------------------------------------------------
+
+while true {
+    foo();
+}
+
+while condition && otherCondition {
+    if shouldBreak {
+        break;
+    }
+
+    if shouldContinue {
+        continue;
+    }
+
+    work();
+}
+
+
+// ------------------------------------------------------------
+// For loops
+// ------------------------------------------------------------
+
+for item in items {
+    process(item);
+}
+
+for [a, b] in pairs {
+    process(a, b);
+}
+
+for {key: value} in objects {
+    process(key, value);
+}
+
+for {a, b} in sets {
+    process(a, b);
+}
+
+for item in 1..100 {
+    process(item);
+}
+
+
+// ------------------------------------------------------------
+// Watch
+// ------------------------------------------------------------
+
+watch value {
+    echo(value);
+}
+
+watch object {
+    update();
+}
+
+
+// ------------------------------------------------------------
+// Match
+// ------------------------------------------------------------
+
+match value {
+    case 1 {
+        one();
+    }
+
+    case 2 | 3 {
+        twoOrThree();
+    }
+
+    case 4 if condition {
+        four();
+    }
+
+    case 5 | 6 | 7 if x > 10 {
+        fiveToSeven();
+    }
+}
+
+match complex.value {
+    case null {
+        handleNull();
+    }
+
+    case true | false {
+        handleBool();
+    }
+
+    case x if x > 100 {
+        handleLarge(x);
+    }
+}
+
+
+// ------------------------------------------------------------
+// Try / catch / finally
+// ------------------------------------------------------------
+
 try {
-	do_sketchy_thing();
+    risky();
+} catch {
+    recover();
 }
-catch {}
-catch SyntaxError {}
-catch Exception as e {
-	print(e);
+
+try {
+    risky();
+} catch Error {
+    handleError();
 }
+
+try {
+    risky();
+} catch Error as e {
+    handle(e);
+}
+
+try {
+    risky();
+} catch Error as e {
+    handle(e);
+} catch {
+    fallback();
+}
+
+try {
+    risky();
+} catch Error as error {
+    handle(error);
+} finally {
+    cleanup();
+}
+
+try {
+    risky();
+} finally {
+    cleanup();
+}
+
+
+// ------------------------------------------------------------
+// Throw / return / break / continue
+// ------------------------------------------------------------
+
+function controlFlow(x) {
+    while true {
+        if x < 0 {
+            throw Error;
+        }
+
+        if x == 0 {
+            continue;
+        }
+
+        if x > 100 {
+            break;
+        }
+
+        return x;
+    }
+
+    return null;
+}
+
+
+// ------------------------------------------------------------
+// Classes
+// ------------------------------------------------------------
+
+class EmptyClass {
+}
+
+class BasicClass {
+    var value;
+    const immutable = 123;
+
+    function getValue() {
+        return value;
+    }
+}
+
+class TypedClass {
+    var name: string = "default";
+    var count: int = 0;
+
+    derive doubled: int = count * 2;
+
+    watch count {
+        onCountChanged();
+    }
+
+    function increment(amount: int) -> int {
+        count += amount;
+        return count;
+    }
+}
+
+class Child is Parent {
+    var childValue: string = "child";
+
+    derive computed: int = childValue.length;
+
+    watch childValue {
+        notify();
+    }
+
+    function method(x: int) -> int {
+        return x + 1;
+    }
+
+    function another(a, b or 10) {
+        return a + b;
+    }
+}
+
+
+// ------------------------------------------------------------
+// Nested classes / complicated class bodies
+// ------------------------------------------------------------
+
+class Complex is Base {
+    var simple = 1;
+    var typed: List[int] = [1, 2, 3];
+
+    const config: Map[string, string] = {
+        "mode": "test",
+    };
+
+    derive value: int | string = simple;
+
+    watch simple {
+        if simple > 10 {
+            notify();
+        } else {
+            ignore();
+        }
+    }
+
+    function calculate(
+        x: int,
+        y: int or 0,
+    ) -> int {
+        try {
+            if x == 0 {
+                throw Error;
+            }
+
+            return x / y;
+        } catch Error as e {
+            log(e);
+            return 0;
+        } finally {
+            cleanup();
+        }
+    }
+}
+
+
+// ------------------------------------------------------------
+// Deep nesting
+// ------------------------------------------------------------
+
+if outer {
+    while middle {
+        for item in collection {
+            if item {
+                try {
+                    functionCall(
+                        object.method(
+                            [
+                                1,
+                                2,
+                                3,
+                            ][0]
+                        )
+                    );
+                } catch Error as e {
+                    handle(
+                        e
+                    );
+                }
+            }
+        }
+    }
+}
+
+
+// ------------------------------------------------------------
+// Weird-but-valid expression combinations
+// ------------------------------------------------------------
+
+var weird1 = foo.bar()[0].baz(qux)[1:10:2];
+
+var weird2 = ((a + b) * (c - d)) ^ (e / f);
+
+var weird3 = !((a == b) && (c != d)) || (x in y);
+
+var weird4 = (
+    foo
+    ~> bar
+    ~> baz
+);
+
+var weird5 = condition
+    ? foo(a, b)[0]
+    : bar.baz(qux);
+
+var weird6 = {
+    "computed": foo(bar)[0],
+    "nested": {
+        "x": [1, 2, 3],
+    },
+};
+
+var weird7 = [
+    foo,
+    bar.baz,
+    qux(1, 2),
+    {
+        "nested": true,
+    },
+];
+
+var weird8 = {
+    foo,
+    bar,
+    baz,
+};
+
+
+// ------------------------------------------------------------
+// Newlines should generally be irrelevant
+// ------------------------------------------------------------
+
+var newlineTest =
+    foo
+    +
+    bar
+    *
+    baz;
+
+var newlineCall =
+    foo(
+        a,
+        b,
+        c,
+    );
+
+var newlineAccess =
+    object
+    .property
+    [index]
+    .method();
+
+
+// ------------------------------------------------------------
+// Comments in awkward positions
+// ------------------------------------------------------------
+
+var comments1 = /* before */ 123;
+
+var comments2 = 123 /* between */ + /* more */ 456;
+
+var comments3 = [
+    1, // first
+    2, // second
+    3, // third
+];
+
+
+// Block comment spanning lines.
+/*
+    This comment contains:
+    braces { }
+    brackets [ ]
+    parentheses ( )
+    strings "hello"
+    operators + - * /
+*/
+
+// ------------------------------------------------------------
+// Final monster expression
+// ------------------------------------------------------------
+
+var finalBoss =
+    condition1
+    ? (
+        foo
+        .bar(
+            -x,
+            !y,
+            z[1:10:2],
+            {
+                "nested": [
+                    a + b * c,
+                    d == e || f,
+                    g ? h : i,
+                ],
+            },
+        )
+        ~> transform
+        ~> finalize
+    )
+    : (
+        fallback
+        .recover(
+            tryValue
+        )
+    );
+
+
+// End.
