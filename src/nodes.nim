@@ -67,6 +67,7 @@ type
         of NodeKind.unaryOp:
             unaryOperator*: TokenType
             unaryOperand*: Node
+            unaryPrefix*: bool
 
         of NodeKind.binaryOp:
             binaryOperator*: TokenType
@@ -279,7 +280,7 @@ proc treeRepr(node: Node, prefix: string, isLast: bool): string =
         result &= treeRepr(node.expression, p, true)
 
     of NodeKind.unaryOp:
-        result = header & "unary: " & $node.unaryOperator & "\n"
+        result = header & "unary " & (if node.unaryPrefix: "prefix" else: "postfix") & " : " & $node.unaryOperator & "\n"
         result &= treeRepr(node.unaryOperand, p, true)
 
     of NodeKind.binaryOp:

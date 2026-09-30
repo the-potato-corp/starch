@@ -461,9 +461,26 @@ proc parse_call_or_access(self: Parser): Node =
             else:
                 return expression
 
+proc parse_postfix(self: Parser): Node =
+    ## Parse postfix unary operations (x++, x--).
+    var expression = self.parse_call_or_access()
+
+    while self.current.kind in {TokenType.plusPlus, TokenType.minusMinus}:
+        let token = self.advance()
+        expression = node(
+            token,
+            token,
+            NodeKind.unaryOp,
+            unaryOperator = token.kind,
+            unaryOperand = expression,
+            unaryPrefix = false
+        )
+
+    return expression
+
 proc parse_exponent(self: Parser): Node =
     ## Parse an exponent.
-    let base = self.parse_call_or_access()
+    let base = self.parse_postfix()
     if self.current.kind == TokenType.caret:
         let token = self.advance()
         let exponent = self.parse_unary()
@@ -477,10 +494,10 @@ proc parse_exponent(self: Parser): Node =
 proc parse_unary(self: Parser): Node =
     ## Parse a unary (prefix) operation.
     let token = self.current
-    if token.kind in {TokenType.minus, TokenType.bang, TokenType.await, TokenType.yield}:
+    if token.kind in {TokenType.minus, TokenType.bang, TokenType.await, TokenType.yield, TokenType.plusPlus, TokenType.minusMinus}:
         discard self.advance()
         let operand = self.parse_unary()
-        return node(token, self.peek(-1), NodeKind.unaryOp, unaryOperator = token.kind, unaryOperand = operand)
+        return node(token, self.peek(-1), NodeKind.unaryOp, unaryOperator = token.kind, unaryOperand = operand, unaryPrefix = true)
 
     return self.parse_exponent()
 
