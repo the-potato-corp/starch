@@ -181,7 +181,8 @@ proc parse_type(self: Parser): Node =
 
     if self.current.kind == TokenType.question:
         # Optional — TypeB? (equivalent to union with none)
-        currentType = node(token, self.advance(), NodeKind.typeOptional, optionalKind = currentType)
+        discard self.advance()
+        currentType = node(token, token, NodeKind.typeOptional, optionalKind = currentType)
 
     if self.current.kind == TokenType.pipe:
         # Union — TypeC | TypeD | TypeE
