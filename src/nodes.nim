@@ -195,6 +195,8 @@ type
         comments*: seq[Token] # dumping ground for comments to use later
 
 proc treeRepr(node: Node, prefix: string, isLast: bool): string =
+    ## Represent the AST in a clean ASCII-style string.
+    # this function is black magic don't try to understand it
     if node == nil: return ""
 
     let
@@ -374,15 +376,37 @@ proc treeRepr(node: Node, prefix: string, isLast: bool): string =
 
     of NodeKind.tryStatement:
         result = header & "try\n"
-        result &= childNodes(node.tryBody, p)
+        let hasCatches = node.tryCatches.len > 0
+        let hasFinally = node.tryFinallyBody.len > 0
+
+        for i, stmt in node.tryBody:
+            let isLastStmt = i == node.tryBody.high
+            let isLastOverall = isLastStmt and not hasCatches and not hasFinally
+            result &= treeRepr(stmt, p, isLastOverall)
+
         for i, c in node.tryCatches:
-            let last  = i == node.tryCatches.high and node.tryFinallyBody.len == 0
-            let cconn = if last: "└── " else: "├── "
-            let cp2   = if last: "    " else: "│   "
-            result &= p & cconn & "catch" & (if c.variable != nil: ": " & c.variable.name else: "") & "\n"
-            if c.kind != nil: result &= treeRepr(c.kind, p & cp2, c.body.len == 0)
-            result &= childNodes(c.body, p & cp2)
-        if node.tryFinallyBody.len > 0:
+            let isLastCatch = i == node.tryCatches.high
+            let isLastOverall = isLastCatch and not hasFinally
+
+            let cconn = if isLastOverall: "└── " else: "├── "
+            let cp = if isLastOverall: "    " else: "│   "
+
+            result &= p & cconn & "catch"
+            if c.variable != nil:
+                result &= ": " & c.variable.name
+            result &= "\n"
+
+            let hasKind = c.kind != nil
+            let hasBody = c.body.len > 0
+
+            if hasKind:
+                result &= treeRepr(c.kind, p & cp, not hasBody)
+
+            for j, stmt in c.body:
+                let isLast = j == c.body.high
+                result &= treeRepr(stmt, p & cp, isLast)
+
+        if hasFinally:
             result &= p & "└── finally\n"
             result &= childNodes(node.tryFinallyBody, p & "    ")
 
