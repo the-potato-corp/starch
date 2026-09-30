@@ -764,29 +764,44 @@ proc parse_using(self: Parser): Node =
     ## using foo, baz from bar; - import names foo and baz from module bar
     ## yeah it's weird so what??
     let token = self.advance()
-    var names = @[self.expect(TokenType.ident).value.strVal]
-    var alias = ""
+    let firstName = self.expect(TokenType.ident).value.strVal
+    var modules: seq[tuple[module: string, alias: string]] = @[]
+    var hasAlias = false
+
     if self.current.kind == TokenType.as:
         discard self.advance()
-        alias = self.expect(TokenType.ident).value.strVal
+        modules.add((module: firstName, alias: self.expect(TokenType.ident).value.strVal))
+        hasAlias = true
+    else:
+        modules.add((module: firstName, alias: ""))
 
     while self.current.kind == TokenType.comma:
         discard self.advance()
-        names.add(self.expect(TokenType.ident).value.strVal)
+        let module = self.expect(TokenType.ident).value.strVal
+
+        if self.current.kind == TokenType.as:
+            discard self.advance()
+            modules.add((module: module, alias: self.expect(TokenType.ident).value.strVal))
+            hasAlias = true
+        else:
+            modules.add((module: module, alias: ""))
 
     if self.current.kind == TokenType.from:
-        if alias != "":
+        if hasAlias:
             raise self.error(StarchSyntaxError, "cannot use 'as' alias with 'from' import")
+
         discard self.advance()
         let module = self.expect(TokenType.ident).value.strVal
         self.terminate()
+
+        # modules was actually the list of objects to import from module
+        var names: seq[string] = @[]
+        for module, alias in modules.items():
+            names.add(module)
+
         return node(token, self.peek(-1), NodeKind.importFrom, importModule = module, importNames = names)
 
     self.terminate()
-    var modules: seq[tuple[module: string, alias: string]] = @[]
-    for i, name in names:
-        # Only the first name can have an alias (using foo as bar)
-        modules.add((module: name, alias: if i == 0: alias else: ""))
     return node(token, self.peek(-1), NodeKind.using, usingModules = modules)
 
 proc parse_match(self: Parser): Node =
