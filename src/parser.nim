@@ -155,17 +155,17 @@ proc is_lambda(self: Parser): bool =
                     # compile time problems are not problems
                     # And lParen tokens are common enough that it
                     # shouldn't be too significant of a problem
+                    pos += 1
                     while pos < len(self.tokens):
-                        let kind = self.tokens[pos].kind
-                        if kind == TokenType.lParen:
-                            return false
-                        if kind == TokenType.fatArrow:
-                            return true
-
-                        pos += 1
-
+                        case self.tokens[pos].kind:
+                            of TokenType.fatArrow:
+                                return true
+                            of TokenType.ident, TokenType.lBracket, TokenType.rBracket,
+                                TokenType.comma, TokenType.question, TokenType.pipe:
+                                pos += 1
+                            else:
+                                return false
                     return false
-
                 return false
         else: discard
         pos += 1
@@ -190,7 +190,7 @@ proc parse_block(self: Parser): seq[Node] =
         result.add(self.parse_statement())
     discard self.expect(TokenType.rBrace)
 
-proc parse_type(self: Parser): Node =
+proc parse_type(self: Parser, pipe: bool = true): Node =
     ## Parse a type hint, with support for unions, generics and optional types.
     let token = self.expect(TokenType.ident)
     # Start with the base identifier
@@ -213,14 +213,14 @@ proc parse_type(self: Parser): Node =
     if self.current.kind == TokenType.question:
         # Optional — TypeB? (equivalent to union with none)
         discard self.advance()
-        currentType = node(token, token, NodeKind.typeOptional, optionalKind = currentType)
+        currentType = node(token, self.peek(-1), NodeKind.typeOptional, optionalKind = currentType)
 
-    if self.current.kind == TokenType.pipe:
+    if self.current.kind == TokenType.pipe and pipe:
         # Union — TypeC | TypeD | TypeE
         var parts = @[currentType]
         while self.current.kind == TokenType.pipe:
             discard self.advance()
-            parts.add(self.parse_type())
+            parts.add(self.parse_type(false))
         return node(token, self.peek(-1), NodeKind.typeUnion, unionKinds = parts)
 
     # If not a union, return the current type
