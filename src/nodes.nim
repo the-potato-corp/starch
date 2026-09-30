@@ -7,14 +7,13 @@ type
     NodeKind* {.pure.} = enum
         parameter, varDeclaration, derivedVariable, literal,
         listLiteral, dictLiteral, setLiteral, identifier,
-        functionCall, memberAccess, expressionStatement,
-        unaryOp, binaryOp, lambda, `break`, `continue`, `return`,
-        throw, `using`, importFrom, ifStatement, whileLoop,
-        forLoop, watchStatement, assign, functionDeclaration,
-        matchStatement, tryStatement, classDeclaration,
-        await, `yield`, indexAccess, ternaryIf, null,
-        comprehension, declarativeObject, typeOptional,
-        typeUnion, genericType, tupleLiteral, slice
+        functionCall, memberAccess, expressionStatement, unaryOp,
+        binaryOp, lambda, `break`, `continue`, `return`, throw,
+        `using`, importFrom, ifStatement, whileLoop, forLoop,
+        watchStatement, assign, functionDeclaration, matchStatement,
+        tryStatement, classDeclaration, indexAccess, ternaryIf,
+        null, comprehension, declarativeObject, typeOptional,
+        typeUnion, genericType, tupleLiteral, slice, `template`
 
     LiteralKind* {.pure.} = enum
         int, float, string, bool
@@ -137,12 +136,6 @@ type
             classWatchers*: seq[Node]
             classDerivatives*: seq[Node]
 
-        of NodeKind.await:
-            awaitExpression*: Node
-
-        of NodeKind.yield:
-            yieldExpression*: Node
-
         of NodeKind.indexAccess:
             indexObj*: Node
             indexMember*: Node
@@ -165,6 +158,7 @@ type
             comprehensionCondition*: Node
 
         of NodeKind.declarativeObject:
+            # Unimplemented.
             objFields*: seq[tuple[name: Node, value: Node]]
             objChildren*: seq[Node]
 
@@ -183,6 +177,9 @@ type
 
         of NodeKind.tupleLiteral:
             tupleItems*: seq[Node]
+
+        of NodeKind.template:
+            parts*: seq[Node]
 
         of NodeKind.break, NodeKind.continue, NodeKind.null:
             discard
@@ -418,14 +415,6 @@ proc treeRepr(node: Node, prefix: string, isLast: bool): string =
         result &= childNodes(node.classWatchers,    p)
         result &= childNodes(node.classDerivatives, p)
 
-    of NodeKind.await:
-        result = header & "await\n"
-        result &= treeRepr(node.awaitExpression, p, true)
-
-    of NodeKind.yield:
-        result = header & "yield\n"
-        result &= treeRepr(node.yieldExpression, p, true)
-
     of NodeKind.indexAccess:
         result = header & "index\n"
         result &= treeRepr(node.indexObj,    p, false)
@@ -453,7 +442,6 @@ proc treeRepr(node: Node, prefix: string, isLast: bool): string =
 
         if node.sliceStep != nil:
             result &= treeRepr(node.sliceStep, p, true)
-
 
     of NodeKind.ternaryIf:
         result = header & "ternary\n"
@@ -493,9 +481,10 @@ proc treeRepr(node: Node, prefix: string, isLast: bool): string =
         result &= treeRepr(node.genericKind, p, node.typeArgs.len == 0)
         result &= childNodes(node.typeArgs, p)
 
-    # of NodeKind.break:    result = header & "break\n"
-    # of NodeKind.continue: result = header & "continue\n"
-    # of NodeKind.null:     result = header & "null\n"
+    of NodeKind.template:
+        result = header & "template\n"
+        result &= childNodes(node.parts, p)
+
     of NodeKind.setLiteral:
         result = header & "set\n" & childNodes(node.setItems, p)
     of NodeKind.tupleLiteral:

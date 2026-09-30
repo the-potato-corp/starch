@@ -229,41 +229,82 @@ proc parse_args(self: Parser): seq[Node] =
 proc parse_primary(self: Parser): Node =
     ## Parse a primary expression (literals, identifiers, groups and lambdas).
     # TODO: This does not support comprehensions.
+    # TODO: This does not support Declarative Object Syntax.
     let token = self.current
     case token.kind:
         of TokenType.number:
             discard self.advance()
-            return node(token, self.peek(-1), NodeKind.literal,
+            return node(token, token, NodeKind.literal,
                 literalKind = LiteralKind.int,
                 literalValue = token.value.strVal
             )
         of TokenType.float:
             discard self.advance()
-            return node(token, self.peek(-1), NodeKind.literal,
+            return node(token, token, NodeKind.literal,
                 literalKind = LiteralKind.float,
                 literalValue = token.value.strVal
             )
         of TokenType.string:
             discard self.advance()
-            return node(token, self.peek(-1), NodeKind.literal,
+            return node(token, token, NodeKind.literal,
                 literalKind = LiteralKind.string,
                 literalValue = token.value.strVal
             )
         of TokenType.bool:
             discard self.advance()
-            return node(token, self.peek(-1), NodeKind.literal,
+            return node(token, token, NodeKind.literal,
                 literalKind = LiteralKind.bool,
                 boolVal = token.value.boolVal
             )
         of TokenType.ident:
             discard self.advance()
-            return node(token, self.peek(-1), NodeKind.identifier,
+            return node(token, token, NodeKind.identifier,
                 name = token.value.strVal
             )
 
         of TokenType.null:
             discard self.advance()
             return node(token, token, NodeKind.null)
+
+        of TokenType.templateStart:
+            # The system is kind of weird
+            # Basically, templateXYZ are strings, followed by a sequence of tokens
+            # representing the expression
+
+            # For example, `Hello ${name}! Welcome to ${place}.`
+            # results in:
+            #     - templateStart "Hello "
+            #     - identifier "name"
+            #     - templateMiddle "! Welcome to "
+            #     - identifier "place"
+            #     - templateEnd "."
+            var parts: seq[Node] = @[]
+            discard self.advance()
+            parts.add(node(token, token, NodeKind.literal, literalKind = LiteralKind.string, literalValue = token.value.strVal))
+
+            while self.current.kind != TokenType.templateEnd:
+                if self.current.kind == TokenType.templateMiddle:
+                    let token = self.advance()
+                    parts.add(node(token, token, NodeKind.literal, literalKind = LiteralKind.string, literalValue = token.value.strVal))
+                else:
+                    parts.add(self.parse_expression())
+
+            let last = self.advance()
+            parts.add(node(last, last, NodeKind.literal, literalKind = LiteralKind.string, literalValue = last.value.strVal))
+            return node(token, self.peek(-1), NodeKind.template, parts = parts)
+
+        of TokenType.templateEnd:
+            # A template string with no interpolation is only templateEnd.
+            # This seems counterintuitive but if you think about it it's more elegant.
+            # If a standalone template string used templateStart, there'd be
+            # extensive parsing logic and edge cases where it's unclear whether
+            # the next token is part of the template string or just an extra token,
+            # whereas this way if there's no interpolation it's a templateEnd.
+            discard self.advance()
+
+            return node(token, token, NodeKind.template, parts = @[
+                node(token, token, NodeKind.literal, literalKind = LiteralKind.string, literalValue = token.value.strVal)
+            ])
 
         of TokenType.lParen:
             # () - grouping/lambda
