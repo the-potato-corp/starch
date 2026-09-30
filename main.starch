@@ -522,7 +522,7 @@ var lambda2 = (x, y) => {
 var lambda3 = (
     x: int,
     y: int or 10,
-) -> int {
+): int => {
     return x + y;
 };
 

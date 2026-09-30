@@ -134,7 +134,7 @@ proc is_lambda(self: Parser): bool =
             if depth == 0:
                 # Check bounds before looking ahead
                 if pos + 1 < len(self.tokens):
-                    return self.tokens[pos + 1].kind == TokenType.fatArrow
+                    return self.tokens[pos + 1].kind in {TokenType.fatArrow, TokenType.colon}
                 return false
         else: discard
         pos += 1
@@ -313,12 +313,20 @@ proc parse_primary(self: Parser): Node =
                 # () => {}
                 discard self.advance()
                 let params = self.parse_params()
+                var kind: Node = nil
                 discard self.expect(TokenType.rParen)
+
+                if self.current.kind == TokenType.colon:
+                    discard self.advance()
+                    kind = self.parse_type()
+
                 discard self.expect(TokenType.fatArrow)
                 let body = self.parse_block()
                 return node(token, self.peek(-1), NodeKind.lambda,
                     lambdaParams = params,
-                    lambdaBody = body)
+                    lambdaBody = body,
+                    lambdaHint = kind
+                )
             # (x)
             discard self.advance()
             let expression = self.parse_expression()
