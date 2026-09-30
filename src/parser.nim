@@ -133,8 +133,39 @@ proc is_lambda(self: Parser): bool =
             depth.dec()
             if depth == 0:
                 # Check bounds before looking ahead
-                if pos + 1 < len(self.tokens):
-                    return self.tokens[pos + 1].kind in {TokenType.fatArrow, TokenType.colon}
+                pos += 1
+                if pos < len(self.tokens):
+                    let next = self.tokens[pos].kind
+                    if next == TokenType.fatArrow:
+                        return true
+                    if next != TokenType.colon:
+                        return false
+
+                    # Colon. This MAY be a return type hinted lambda, or not.
+                    # It could be a grouping expression as the true value for a ternary if...
+                    # please god let this be over
+
+                    # Okay I thought of something
+                    # The type system NEVER uses parentheses
+                    # So we can just move forward looking for a fatArrow
+                    # If the token is EOF or lParen, it's not a lambda
+                    # If we reach fatArrow first, it's a lambda
+
+                    # Inelegant and kind of slow but it's FINEEEEE
+                    # compile time problems are not problems
+                    # And lParen tokens are common enough that it
+                    # shouldn't be too significant of a problem
+                    while pos < len(self.tokens):
+                        let kind = self.tokens[pos].kind
+                        if kind == TokenType.lParen:
+                            return false
+                        if kind == TokenType.fatArrow:
+                            return true
+
+                        pos += 1
+
+                    return false
+
                 return false
         else: discard
         pos += 1
@@ -310,6 +341,7 @@ proc parse_primary(self: Parser): Node =
         of TokenType.lParen:
             # () - grouping/lambda
             if self.is_lambda():
+                echo "+ lambda check"
                 # () => {}
                 discard self.advance()
                 let params = self.parse_params()
@@ -328,6 +360,7 @@ proc parse_primary(self: Parser): Node =
                     lambdaHint = kind
                 )
             # (x)
+            echo "group"
             discard self.advance()
             let expression = self.parse_expression()
             discard self.expect(TokenType.rParen)
@@ -415,11 +448,14 @@ proc parse_primary(self: Parser): Node =
 proc parse_call_or_access(self: Parser): Node =
     ## Parse a call or member access (function calls, indexes and dot notation).
     let start = self.current
+    echo "start: " & $start
     var expression = self.parse_primary()
 
     while true:
+        echo "curr: " & $self.current
         case self.current.kind:
             of TokenType.lParen:
+                echo "functionc all"
                 # Function call
                 discard self.advance()
                 let args = self.parse_args()
@@ -427,6 +463,7 @@ proc parse_call_or_access(self: Parser): Node =
                 expression = node(start, self.peek(-1), NodeKind.functionCall, callCallee = expression, callArgs = args)
 
             of TokenType.lBracket:
+                echo "index access"
                 # Index access
                 discard self.advance()
                 var isSlice = false
@@ -463,10 +500,12 @@ proc parse_call_or_access(self: Parser): Node =
 
             of TokenType.dot:
                 # Member access
+                echo "memberaccess"
                 discard self.advance()
                 let member = self.parse_expression()
                 expression = node(start, self.peek(-1), NodeKind.memberAccess, accessObj = expression, accessMember = member)
             else:
+                echo "expr"
                 return expression
 
 proc parse_postfix(self: Parser): Node =
