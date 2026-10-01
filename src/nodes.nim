@@ -195,11 +195,12 @@ type
     TreeItem = object
         ## A printable tree node: a label plus children. Knows nothing about the AST.
         label: string
-        kids: seq[TreeItem]
+        children: seq[TreeItem]
 
     TreeCtx = object
         ## Options threaded through the conversion.
         showSpans: bool
+        tokens: seq[Token]
 
 # generic tree printing
 
@@ -208,16 +209,31 @@ proc render(item: TreeItem, prefix: string, isLast: bool, output: var string) =
     output &= prefix & (if isLast: "└── " else: "├── ") & item.label & "\n"
 
     let childPrefix = prefix & (if isLast: "    " else: "│   ")
-    for i, kid in item.kids:
-        render(kid, childPrefix, i == item.kids.high, output)
+    for i, kid in item.children:
+        render(kid, childPrefix, i == item.children.high, output)
 
 # ast -> tree
 
 proc toTree(node: Node, ctx: TreeCtx, role = ""): TreeItem
 
-proc spanText(node: Node): string =
-    ## Inclusive byte span, e.g. `[4..9]`. Zero-length nodes show as `[4..4]`.
-    "[" & $node.pos & ".." & $(node.pos + max(node.length, 1) - 1) & "]"
+proc firstTokenAt(tokens: seq[Token], pos: int): int =
+    ## Index of the first token starting at or after `pos`.
+    var lo = 0
+    var hi = tokens.len
+    while lo < hi:
+        let mid = (lo + hi) div 2
+        if tokens[mid].pos < pos: lo = mid + 1
+        else: hi = mid
+    lo
+
+proc spanText(node: Node, tokens: seq[Token]): string =
+    ## Inclusive span, e.g. `[4..9]`. Counts tokens if `tokens` is given, otherwise bytes.
+    if tokens.len == 0:
+        return "[" & $node.pos & ".." & $(node.pos + max(node.length, 1) - 1) & "]"
+
+    let first = firstTokenAt(tokens, node.pos)
+    let last = max(first, firstTokenAt(tokens, node.pos + max(node.length, 1)) - 1)
+    "[" & $first & ".." & $last & "]"
 
 proc nameOf(node: Node): string =
     ## Inline name for declarations (" foo"), or "" when absent / not an identifier.
@@ -232,33 +248,33 @@ proc many(ctx: TreeCtx, nodes: seq[Node], role = ""): seq[TreeItem] =
 proc group(ctx: TreeCtx, label: string, nodes: seq[Node]): seq[TreeItem] =
     ## A labelled container ("body", "else", ...). Omitted when empty.
     if nodes.len > 0:
-        @[TreeItem(label: label, kids: many(ctx, nodes))]
+        @[TreeItem(label: label, children: many(ctx, nodes))]
     else:
         @[]
 
-proc branch(label: string, kids: seq[TreeItem]): seq[TreeItem] =
-    @[TreeItem(label: label, kids: kids)]
+proc branch(label: string, children: seq[TreeItem]): seq[TreeItem] =
+    @[TreeItem(label: label, children: children)]
 
 proc toTree(node: Node, ctx: TreeCtx, role = ""): TreeItem =
     if node == nil:
         return TreeItem(label: (if role != "": role & ": " else: "") & "<nil>")
 
     var text: string
-    var kids: seq[TreeItem]
+    var children: seq[TreeItem]
 
     case node.kind
     of NodeKind.parameter:
         text = "parameter" & nameOf(node.paramName)
-        kids = ctx.one(node.paramHint, "hint") & ctx.one(node.paramDefault, "default")
+        children = ctx.one(node.paramHint, "hint") & ctx.one(node.paramDefault, "default")
 
     of NodeKind.varDeclaration:
         text = "var" & (if node.varMutable: " (mut)" else: "")
-        kids = ctx.one(node.varName, "name") & ctx.one(node.varHint, "hint") &
+        children = ctx.one(node.varName, "name") & ctx.one(node.varHint, "hint") &
                 ctx.one(node.varValue, "value")
 
     of NodeKind.derivedVariable:
         text = "derived" & nameOf(node.derivedName)
-        kids = ctx.one(node.derivedHint, "hint") & ctx.one(node.derivedValue, "value")
+        children = ctx.one(node.derivedHint, "hint") & ctx.one(node.derivedValue, "value")
 
     of NodeKind.literal:
         case node.literalKind
@@ -271,117 +287,117 @@ proc toTree(node: Node, ctx: TreeCtx, role = ""): TreeItem =
 
     of NodeKind.listLiteral:
         text = "list"
-        kids = ctx.many(node.listElements)
+        children = ctx.many(node.listElements)
 
     of NodeKind.dictLiteral:
         text = "dict"
         for pair in node.dictPairs:
-            kids &= branch("pair", ctx.one(pair.key, "key") & ctx.one(pair.value, "value"))
+            children &= branch("pair", ctx.one(pair.key, "key") & ctx.one(pair.value, "value"))
 
     of NodeKind.setLiteral:
         text = "set"
-        kids = ctx.many(node.setItems)
+        children = ctx.many(node.setItems)
 
     of NodeKind.tupleLiteral:
         text = "tuple"
-        kids = ctx.many(node.tupleItems)
+        children = ctx.many(node.tupleItems)
 
     of NodeKind.identifier:
         text = "identifier " & node.name
 
     of NodeKind.functionCall:
         text = "call"
-        kids = ctx.one(node.callCallee, "callee") & ctx.many(node.callArgs, "arg")
+        children = ctx.one(node.callCallee, "callee") & ctx.many(node.callArgs, "arg")
 
     of NodeKind.memberAccess:
         text = "access"
-        kids = ctx.one(node.accessObj, "object") & ctx.one(node.accessMember, "member")
+        children = ctx.one(node.accessObj, "object") & ctx.one(node.accessMember, "member")
 
     of NodeKind.expressionStatement:
         text = "exprStmt"
-        kids = ctx.one(node.expression)
+        children = ctx.one(node.expression)
 
     of NodeKind.unaryOp:
         text = "unary " & (if node.unaryPrefix: "prefix" else: "postfix") &
                 ": " & $node.unaryOperator
-        kids = ctx.one(node.unaryOperand)
+        children = ctx.one(node.unaryOperand)
 
     of NodeKind.binaryOp:
         text = "binary: " & $node.binaryOperator
-        kids = ctx.one(node.binaryLeft, "left") & ctx.one(node.binaryRight, "right")
+        children = ctx.one(node.binaryLeft, "left") & ctx.one(node.binaryRight, "right")
 
     of NodeKind.lambda:
         text = "lambda"
-        kids = ctx.many(node.lambdaParams, "param") & ctx.one(node.lambdaHint, "returns") &
+        children = ctx.many(node.lambdaParams, "param") & ctx.one(node.lambdaHint, "returns") &
                 ctx.group("body", node.lambdaBody)
 
     of NodeKind.return:
         text = "return"
-        kids = ctx.one(node.returnValue)
+        children = ctx.one(node.returnValue)
 
     of NodeKind.throw:
         text = "throw"
-        kids = ctx.one(node.throwException)
+        children = ctx.one(node.throwException)
 
     of NodeKind.using:
         text = "using"
         for m in node.usingModules:
-            kids &= TreeItem(label: m.module & (if m.alias != "": " as " & m.alias else: ""))
+            children &= TreeItem(label: m.module & (if m.alias != "": " as " & m.alias else: ""))
 
     of NodeKind.importFrom:
         text = "import from: " & node.importModule
         for name in node.importNames:
-            kids &= TreeItem(label: name)
+            children &= TreeItem(label: name)
 
     of NodeKind.ifStatement:
         text = "if"
         for i, b in node.ifBranches:
-            kids &= branch(if i == 0: "if" else: "elif",
+            children &= branch(if i == 0: "if" else: "elif",
                 ctx.one(b.condition, "condition") & ctx.group("body", b.body))
-        kids &= ctx.group("else", node.ifElseBody)
+        children &= ctx.group("else", node.ifElseBody)
 
     of NodeKind.whileLoop:
         text = "while"
-        kids = ctx.one(node.whileCondition, "condition") & ctx.group("body", node.whileBody)
+        children = ctx.one(node.whileCondition, "condition") & ctx.group("body", node.whileBody)
 
     of NodeKind.forLoop:
         text = "for"
-        kids = ctx.one(node.forVariable, "variable") & ctx.one(node.forCollection, "in") &
+        children = ctx.one(node.forVariable, "variable") & ctx.one(node.forCollection, "in") &
                 ctx.group("body", node.forBody)
 
     of NodeKind.watchStatement:
         text = "watch"
-        kids = ctx.one(node.watchTarget, "target") & ctx.group("body", node.watchBody)
+        children = ctx.one(node.watchTarget, "target") & ctx.group("body", node.watchBody)
 
     of NodeKind.assign:
         text = "assign: " & $node.assignOperator
-        kids = ctx.one(node.assignVariable, "target") & ctx.one(node.assignValue, "value")
+        children = ctx.one(node.assignVariable, "target") & ctx.one(node.assignValue, "value")
 
     of NodeKind.functionDeclaration:
         text = "func" & nameOf(node.funcName)
-        kids = ctx.many(node.funcParams, "param") & ctx.one(node.funcReturnKind, "returns") &
+        children = ctx.many(node.funcParams, "param") & ctx.one(node.funcReturnKind, "returns") &
                 ctx.group("body", node.funcBody)
 
     of NodeKind.matchStatement:
         text = "match"
-        kids = ctx.one(node.matchExpression, "subject")
+        children = ctx.one(node.matchExpression, "subject")
         for c in node.matchCases:
-            kids &= branch("case",
+            children &= branch("case",
                 ctx.many(c.patterns, "pattern") & ctx.one(c.guard, "guard") &
                 ctx.group("body", c.body))
 
     of NodeKind.tryStatement:
         text = "try"
-        kids = ctx.group("body", node.tryBody)
+        children = ctx.group("body", node.tryBody)
         for c in node.tryCatches:
-            kids &= branch("catch",
+            children &= branch("catch",
                 ctx.one(c.kind, "type") & ctx.one(c.variable, "as") &
                 ctx.group("body", c.body))
-        kids &= ctx.group("finally", node.tryFinallyBody)
+        children &= ctx.group("finally", node.tryFinallyBody)
 
     of NodeKind.classDeclaration:
         text = "class" & nameOf(node.className)
-        kids = ctx.one(node.classParent, "parent") &
+        children = ctx.one(node.classParent, "parent") &
                 ctx.group("fields", node.classFields) &
                 ctx.group("methods", node.classMethods) &
                 ctx.group("watchers", node.classWatchers) &
@@ -389,29 +405,29 @@ proc toTree(node: Node, ctx: TreeCtx, role = ""): TreeItem =
 
     of NodeKind.indexAccess:
         text = "index"
-        kids = ctx.one(node.indexObj, "object") & ctx.one(node.indexMember, "index")
+        children = ctx.one(node.indexObj, "object") & ctx.one(node.indexMember, "index")
 
     of NodeKind.slice:
         text = "slice"
-        kids = ctx.one(node.sliceObj, "object")
+        children = ctx.one(node.sliceObj, "object")
 
         let laterThanStart = node.sliceStop != nil or node.sliceStep != nil
-        if node.sliceStart != nil: kids &= ctx.one(node.sliceStart, "start")
-        elif laterThanStart: kids &= TreeItem(label: "start: <empty>")
+        if node.sliceStart != nil: children &= ctx.one(node.sliceStart, "start")
+        elif laterThanStart: children &= TreeItem(label: "start: <empty>")
 
-        if node.sliceStop != nil: kids &= ctx.one(node.sliceStop, "stop")
-        elif node.sliceStep != nil: kids &= TreeItem(label: "stop: <empty>")
+        if node.sliceStop != nil: children &= ctx.one(node.sliceStop, "stop")
+        elif node.sliceStep != nil: children &= TreeItem(label: "stop: <empty>")
 
-        kids &= ctx.one(node.sliceStep, "step")
+        children &= ctx.one(node.sliceStep, "step")
 
     of NodeKind.ternaryIf:
         text = "ternary"
-        kids = ctx.one(node.ternaryCondition, "condition") &
+        children = ctx.one(node.ternaryCondition, "condition") &
                 ctx.one(node.ternaryTrue, "then") & ctx.one(node.ternaryFalse, "else")
 
     of NodeKind.comprehension:
         text = "comprehension"
-        kids = ctx.one(node.comprehensionExpr, "expr") &
+        children = ctx.one(node.comprehensionExpr, "expr") &
                 ctx.many(node.comprehensionVars, "variable") &
                 ctx.one(node.comprehensionCollection, "in") &
                 ctx.one(node.comprehensionCondition, "if")
@@ -419,24 +435,24 @@ proc toTree(node: Node, ctx: TreeCtx, role = ""): TreeItem =
     of NodeKind.declarativeObject:
         text = "object"
         for f in node.objFields:
-            kids &= branch("field", ctx.one(f.name, "name") & ctx.one(f.value, "value"))
-        kids &= ctx.many(node.objChildren, "child")
+            children &= branch("field", ctx.one(f.name, "name") & ctx.one(f.value, "value"))
+        children &= ctx.many(node.objChildren, "child")
 
     of NodeKind.typeOptional:
         text = "optional"
-        kids = ctx.one(node.optionalKind)
+        children = ctx.one(node.optionalKind)
 
     of NodeKind.typeUnion:
         text = "union"
-        kids = ctx.many(node.unionKinds)
+        children = ctx.many(node.unionKinds)
 
     of NodeKind.genericType:
         text = "generic"
-        kids = ctx.one(node.genericKind, "base") & ctx.many(node.typeArgs, "arg")
+        children = ctx.one(node.genericKind, "base") & ctx.many(node.typeArgs, "arg")
 
     of NodeKind.template:
         text = "template"
-        kids = ctx.many(node.parts, "part")
+        children = ctx.many(node.parts, "part")
 
     of NodeKind.break:    text = "break"
     of NodeKind.continue: text = "continue"
@@ -444,17 +460,19 @@ proc toTree(node: Node, ctx: TreeCtx, role = ""): TreeItem =
 
     var label = text
     if role != "": label = role & ": " & label
-    if ctx.showSpans: label &= " " & spanText(node)
+    if ctx.showSpans: label &= " " & spanText(node, ctx.tokens)
 
-    TreeItem(label: label, kids: kids)
+    TreeItem(label: label, children: children)
 
-proc treeRepr(node: Node, prefix: string, isLast: bool, showSpans = false): string =
+# entry points
+
+proc treeRepr*(node: Node, prefix: string, isLast: bool, showSpans = false, tokens: seq[Token] = @[]): string =
     ## Represent the AST in a clean ASCII-style string.
     # this function is black magic don't try to understand it
 
     if node == nil: return ""
 
-    render(toTree(node, TreeCtx(showSpans: showSpans)), prefix, isLast, result)
+    render(toTree(node, TreeCtx(showSpans: showSpans, tokens: tokens)), prefix, isLast, result)
 
 proc `$`*(node: Node): string =
     treeRepr(node, "", true)
@@ -464,7 +482,7 @@ proc `$`*(program: Program): string =
     for i, node in program.statements:
         result &= treeRepr(node, "", i == program.statements.high)
 
-proc tree*(program: Program, showSpans = false): string =
+proc tree*(program: Program, showSpans = false, tokens: seq[Token] = @[]): string =
     result = "program\n"
     for i, node in program.statements:
         result &= treeRepr(node, "", i == program.statements.high, showSpans)
