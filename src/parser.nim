@@ -508,12 +508,13 @@ proc parse_call_or_access(self: Parser): Node =
 
 proc parse_postfix(self: Parser): Node =
     ## Parse postfix unary operations (x++, x--).
+    let first = self.current
     var expression = self.parse_call_or_access()
 
     while self.current.kind in {TokenType.plusPlus, TokenType.minusMinus}:
         let token = self.advance()
         expression = node(
-            token,
+            first,
             token,
             NodeKind.unaryOp,
             unaryOperator = token.kind,
@@ -525,11 +526,12 @@ proc parse_postfix(self: Parser): Node =
 
 proc parse_exponent(self: Parser): Node =
     ## Parse an exponent.
+    let first = self.current
     let base = self.parse_postfix()
     if self.current.kind == TokenType.caret:
         let token = self.advance()
         let exponent = self.parse_unary()
-        return node(token, self.peek(-1), NodeKind.binaryOp,
+        return node(first, self.peek(-1), NodeKind.binaryOp,
             binaryOperator = token.kind,
             binaryLeft = base,
             binaryRight = exponent
@@ -548,13 +550,13 @@ proc parse_unary(self: Parser): Node =
 
 proc parse_multiplicative(self: Parser): Node =
     ## Parse a multiplicative operation (*, /).
+    let first = self.current
     var left = self.parse_unary()
 
     while self.current.kind in {TokenType.star, TokenType.slash, TokenType.percent}:
-        let token = self.current
         let operator = self.advance().kind
         let right = self.parse_unary()
-        left = node(token, self.peek(-1), NodeKind.binaryOp,
+        left = node(first, self.peek(-1), NodeKind.binaryOp,
             binaryOperator = operator,
             binaryLeft = left,
             binaryRight = right
@@ -563,13 +565,13 @@ proc parse_multiplicative(self: Parser): Node =
 
 proc parse_additive(self: Parser): Node =
     ## Parse an additive operation (+, -).
+    let first = self.current
     var left = self.parse_multiplicative()
 
     while self.current.kind in {TokenType.plus, TokenType.minus}:
-        let token = self.current
         let operator = self.advance().kind
         let right = self.parse_multiplicative()
-        left = node(token, self.peek(-1), NodeKind.binaryOp,
+        left = node(first, self.peek(-1), NodeKind.binaryOp,
             binaryOperator = operator,
             binaryLeft = left,
             binaryRight = right

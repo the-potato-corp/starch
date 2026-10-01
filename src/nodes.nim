@@ -209,8 +209,8 @@ proc render(item: TreeItem, prefix: string, isLast: bool, output: var string) =
     output &= prefix & (if isLast: "└── " else: "├── ") & item.label & "\n"
 
     let childPrefix = prefix & (if isLast: "    " else: "│   ")
-    for i, kid in item.children:
-        render(kid, childPrefix, i == item.children.high, output)
+    for i, child in item.children:
+        render(child, childPrefix, i == item.children.high, output)
 
 # ast -> tree
 
@@ -485,7 +485,7 @@ proc `$`*(program: Program): string =
 proc tree*(program: Program, showSpans = false, tokens: seq[Token] = @[]): string =
     result = "program\n"
     for i, node in program.statements:
-        result &= treeRepr(node, "", i == program.statements.high, showSpans)
+        result &= treeRepr(node, "", i == program.statements.high, showSpans, tokens)
 
 macro node*(startToken, endToken, nodeKind: untyped, args: varargs[untyped]): untyped =
     ## Constructs a Node, deriving positional metadata from two tokens.
