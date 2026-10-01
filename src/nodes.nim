@@ -1,4 +1,5 @@
 import std/macros
+import std/strutils
 import lexer
 import tokens
 
@@ -191,806 +192,269 @@ type
         statements*: seq[Node]
         comments*: seq[Token] # dumping ground for comments to use later
 
-proc treeRepr(node: Node, prefix: string, isLast: bool): string =
+    TreeItem = object
+        ## A printable tree node: a label plus children. Knows nothing about the AST.
+        label: string
+        kids: seq[TreeItem]
+
+    TreeCtx = object
+        ## Options threaded through the conversion.
+        showSpans: bool
+
+# generic tree printing
+
+proc render(item: TreeItem, prefix: string, isLast: bool, output: var string) =
+    ## The ONLY place connectors and indentation are drawn.
+    output &= prefix & (if isLast: "└── " else: "├── ") & item.label & "\n"
+
+    let childPrefix = prefix & (if isLast: "    " else: "│   ")
+    for i, kid in item.kids:
+        render(kid, childPrefix, i == item.kids.high, output)
+
+# ast -> tree
+
+proc toTree(node: Node, ctx: TreeCtx, role = ""): TreeItem
+
+proc spanText(node: Node): string =
+    ## Inclusive byte span, e.g. `[4..9]`. Zero-length nodes show as `[4..4]`.
+    "[" & $node.pos & ".." & $(node.pos + max(node.length, 1) - 1) & "]"
+
+proc nameOf(node: Node): string =
+    ## Inline name for declarations (" foo"), or "" when absent / not an identifier.
+    if node != nil and node.kind == NodeKind.identifier: " " & node.name else: ""
+
+proc one(ctx: TreeCtx, node: Node, role = ""): seq[TreeItem] =
+    if node != nil: @[toTree(node, ctx, role)] else: @[]
+
+proc many(ctx: TreeCtx, nodes: seq[Node], role = ""): seq[TreeItem] =
+    for n in nodes: result.add toTree(n, ctx, role)
+
+proc group(ctx: TreeCtx, label: string, nodes: seq[Node]): seq[TreeItem] =
+    ## A labelled container ("body", "else", ...). Omitted when empty.
+    if nodes.len > 0:
+        @[TreeItem(label: label, kids: many(ctx, nodes))]
+    else:
+        @[]
+
+proc branch(label: string, kids: seq[TreeItem]): seq[TreeItem] =
+    @[TreeItem(label: label, kids: kids)]
+
+proc toTree(node: Node, ctx: TreeCtx, role = ""): TreeItem =
+    if node == nil:
+        return TreeItem(label: (if role != "": role & ": " else: "") & "<nil>")
+
+    var text: string
+    var kids: seq[TreeItem]
+
+    case node.kind
+    of NodeKind.parameter:
+        text = "parameter" & nameOf(node.paramName)
+        kids = ctx.one(node.paramHint, "hint") & ctx.one(node.paramDefault, "default")
+
+    of NodeKind.varDeclaration:
+        text = "var" & (if node.varMutable: " (mut)" else: "")
+        kids = ctx.one(node.varName, "name") & ctx.one(node.varHint, "hint") &
+                ctx.one(node.varValue, "value")
+
+    of NodeKind.derivedVariable:
+        text = "derived" & nameOf(node.derivedName)
+        kids = ctx.one(node.derivedHint, "hint") & ctx.one(node.derivedValue, "value")
+
+    of NodeKind.literal:
+        case node.literalKind
+        of LiteralKind.bool:
+            text = "literal (bool): " & $node.boolVal
+        of LiteralKind.string:
+            text = "literal (string): " & escape(node.literalValue)
+        else:
+            text = "literal (" & $node.literalKind & "): " & node.literalValue
+
+    of NodeKind.listLiteral:
+        text = "list"
+        kids = ctx.many(node.listElements)
+
+    of NodeKind.dictLiteral:
+        text = "dict"
+        for pair in node.dictPairs:
+            kids &= branch("pair", ctx.one(pair.key, "key") & ctx.one(pair.value, "value"))
+
+    of NodeKind.setLiteral:
+        text = "set"
+        kids = ctx.many(node.setItems)
+
+    of NodeKind.tupleLiteral:
+        text = "tuple"
+        kids = ctx.many(node.tupleItems)
+
+    of NodeKind.identifier:
+        text = "identifier " & node.name
+
+    of NodeKind.functionCall:
+        text = "call"
+        kids = ctx.one(node.callCallee, "callee") & ctx.many(node.callArgs, "arg")
+
+    of NodeKind.memberAccess:
+        text = "access"
+        kids = ctx.one(node.accessObj, "object") & ctx.one(node.accessMember, "member")
+
+    of NodeKind.expressionStatement:
+        text = "exprStmt"
+        kids = ctx.one(node.expression)
+
+    of NodeKind.unaryOp:
+        text = "unary " & (if node.unaryPrefix: "prefix" else: "postfix") &
+                ": " & $node.unaryOperator
+        kids = ctx.one(node.unaryOperand)
+
+    of NodeKind.binaryOp:
+        text = "binary: " & $node.binaryOperator
+        kids = ctx.one(node.binaryLeft, "left") & ctx.one(node.binaryRight, "right")
+
+    of NodeKind.lambda:
+        text = "lambda"
+        kids = ctx.many(node.lambdaParams, "param") & ctx.one(node.lambdaHint, "returns") &
+                ctx.group("body", node.lambdaBody)
+
+    of NodeKind.return:
+        text = "return"
+        kids = ctx.one(node.returnValue)
+
+    of NodeKind.throw:
+        text = "throw"
+        kids = ctx.one(node.throwException)
+
+    of NodeKind.using:
+        text = "using"
+        for m in node.usingModules:
+            kids &= TreeItem(label: m.module & (if m.alias != "": " as " & m.alias else: ""))
+
+    of NodeKind.importFrom:
+        text = "import from: " & node.importModule
+        for name in node.importNames:
+            kids &= TreeItem(label: name)
+
+    of NodeKind.ifStatement:
+        text = "if"
+        for i, b in node.ifBranches:
+            kids &= branch(if i == 0: "if" else: "elif",
+                ctx.one(b.condition, "condition") & ctx.group("body", b.body))
+        kids &= ctx.group("else", node.ifElseBody)
+
+    of NodeKind.whileLoop:
+        text = "while"
+        kids = ctx.one(node.whileCondition, "condition") & ctx.group("body", node.whileBody)
+
+    of NodeKind.forLoop:
+        text = "for"
+        kids = ctx.one(node.forVariable, "variable") & ctx.one(node.forCollection, "in") &
+                ctx.group("body", node.forBody)
+
+    of NodeKind.watchStatement:
+        text = "watch"
+        kids = ctx.one(node.watchTarget, "target") & ctx.group("body", node.watchBody)
+
+    of NodeKind.assign:
+        text = "assign: " & $node.assignOperator
+        kids = ctx.one(node.assignVariable, "target") & ctx.one(node.assignValue, "value")
+
+    of NodeKind.functionDeclaration:
+        text = "func" & nameOf(node.funcName)
+        kids = ctx.many(node.funcParams, "param") & ctx.one(node.funcReturnKind, "returns") &
+                ctx.group("body", node.funcBody)
+
+    of NodeKind.matchStatement:
+        text = "match"
+        kids = ctx.one(node.matchExpression, "subject")
+        for c in node.matchCases:
+            kids &= branch("case",
+                ctx.many(c.patterns, "pattern") & ctx.one(c.guard, "guard") &
+                ctx.group("body", c.body))
+
+    of NodeKind.tryStatement:
+        text = "try"
+        kids = ctx.group("body", node.tryBody)
+        for c in node.tryCatches:
+            kids &= branch("catch",
+                ctx.one(c.kind, "type") & ctx.one(c.variable, "as") &
+                ctx.group("body", c.body))
+        kids &= ctx.group("finally", node.tryFinallyBody)
+
+    of NodeKind.classDeclaration:
+        text = "class" & nameOf(node.className)
+        kids = ctx.one(node.classParent, "parent") &
+                ctx.group("fields", node.classFields) &
+                ctx.group("methods", node.classMethods) &
+                ctx.group("watchers", node.classWatchers) &
+                ctx.group("derived", node.classDerivatives)
+
+    of NodeKind.indexAccess:
+        text = "index"
+        kids = ctx.one(node.indexObj, "object") & ctx.one(node.indexMember, "index")
+
+    of NodeKind.slice:
+        text = "slice"
+        kids = ctx.one(node.sliceObj, "object")
+
+        let laterThanStart = node.sliceStop != nil or node.sliceStep != nil
+        if node.sliceStart != nil: kids &= ctx.one(node.sliceStart, "start")
+        elif laterThanStart: kids &= TreeItem(label: "start: <empty>")
+
+        if node.sliceStop != nil: kids &= ctx.one(node.sliceStop, "stop")
+        elif node.sliceStep != nil: kids &= TreeItem(label: "stop: <empty>")
+
+        kids &= ctx.one(node.sliceStep, "step")
+
+    of NodeKind.ternaryIf:
+        text = "ternary"
+        kids = ctx.one(node.ternaryCondition, "condition") &
+                ctx.one(node.ternaryTrue, "then") & ctx.one(node.ternaryFalse, "else")
+
+    of NodeKind.comprehension:
+        text = "comprehension"
+        kids = ctx.one(node.comprehensionExpr, "expr") &
+                ctx.many(node.comprehensionVars, "variable") &
+                ctx.one(node.comprehensionCollection, "in") &
+                ctx.one(node.comprehensionCondition, "if")
+
+    of NodeKind.declarativeObject:
+        text = "object"
+        for f in node.objFields:
+            kids &= branch("field", ctx.one(f.name, "name") & ctx.one(f.value, "value"))
+        kids &= ctx.many(node.objChildren, "child")
+
+    of NodeKind.typeOptional:
+        text = "optional"
+        kids = ctx.one(node.optionalKind)
+
+    of NodeKind.typeUnion:
+        text = "union"
+        kids = ctx.many(node.unionKinds)
+
+    of NodeKind.genericType:
+        text = "generic"
+        kids = ctx.one(node.genericKind, "base") & ctx.many(node.typeArgs, "arg")
+
+    of NodeKind.template:
+        text = "template"
+        kids = ctx.many(node.parts, "part")
+
+    of NodeKind.break:    text = "break"
+    of NodeKind.continue: text = "continue"
+    of NodeKind.null:     text = "null"
+
+    var label = text
+    if role != "": label = role & ": " & label
+    if ctx.showSpans: label &= " " & spanText(node)
+
+    TreeItem(label: label, kids: kids)
+
+proc treeRepr(node: Node, prefix: string, isLast: bool, showSpans = false): string =
     ## Represent the AST in a clean ASCII-style string.
     # this function is black magic don't try to understand it
 
     if node == nil: return ""
 
-    let connector = if isLast: "└── " else: "├── "
-    let childPrefix = prefix & (if isLast: "    " else: "│   ")
-    let header = prefix & connector
-
-    proc child(n: Node, last: bool): string =
-        treeRepr(n, childPrefix, last)
-
-    proc children(nodes: seq[Node]): string =
-        for i, n in nodes:
-            result &= treeRepr(
-                n,
-                childPrefix,
-                i == nodes.high
-            )
-
-    proc namedChild(label: string, n: Node, last: bool): string =
-        if n == nil:
-            return ""
-
-        let conn = if last: "└── " else: "├── "
-        result = childPrefix & conn & label & "\n"
-
-        let p = childPrefix & (if last: "    " else: "│   ")
-        result &= treeRepr(n, p, true)
-
-    proc leaf(label: string, last: bool): string =
-        childPrefix &
-            (if last: "└── " else: "├── ") &
-            label & "\n"
-
-    case node.kind:
-        of NodeKind.parameter:
-            result = header & "parameter"
-            if node.paramName != nil:
-                result &= ": " & node.paramName.name
-            result &= "\n"
-
-            let hasHint = node.paramHint != nil
-            let hasDefault = node.paramDefault != nil
-
-            if hasHint:
-                result &= treeRepr(
-                    node.paramHint,
-                    childPrefix,
-                    not hasDefault
-                )
-
-            if hasDefault:
-                result &= treeRepr(
-                    node.paramDefault,
-                    childPrefix,
-                    true
-                )
-
-        of NodeKind.varDeclaration:
-            result = header & "var"
-            if node.varMutable:
-                result &= " (mut)"
-            result &= "\n"
-
-            let hasName = node.varName != nil
-            let hasHint = node.varHint != nil
-            let hasValue = node.varValue != nil
-
-            var remaining = 0
-            if hasName: remaining.inc
-            if hasHint: remaining.inc
-            if hasValue: remaining.inc
-
-            var index = 0
-
-            if hasName:
-                index.inc
-                result &= treeRepr(
-                    node.varName,
-                    childPrefix,
-                    index == remaining
-                )
-
-            if hasHint:
-                index.inc
-                result &= treeRepr(
-                    node.varHint,
-                    childPrefix,
-                    index == remaining
-                )
-
-            if hasValue:
-                result &= treeRepr(
-                    node.varValue,
-                    childPrefix,
-                    true
-                )
-
-        of NodeKind.derivedVariable:
-            result = header & "derived"
-            if node.derivedName != nil:
-                result &= ": " & node.derivedName.name
-            result &= "\n"
-
-            let hasHint = node.derivedHint != nil
-            let hasValue = node.derivedValue != nil
-
-            if hasHint:
-                result &= treeRepr(
-                    node.derivedHint,
-                    childPrefix,
-                    not hasValue
-                )
-
-            if hasValue:
-                result &= treeRepr(
-                    node.derivedValue,
-                    childPrefix,
-                    true
-                )
-
-        of NodeKind.literal:
-            result = header & "literal: "
-
-            case node.literalKind:
-            of LiteralKind.bool:
-                result &= $node.boolVal
-            else:
-                result &= node.literalValue
-
-            result &= "\n"
-
-        of NodeKind.listLiteral:
-            result = header & "list\n"
-            result &= children(node.listElements)
-
-        of NodeKind.dictLiteral:
-            result = header & "dict\n"
-
-            for i, pair in node.dictPairs:
-                let pairLast = i == node.dictPairs.high
-                let pairConn = if pairLast: "└── " else: "├── "
-                let pairPrefix = childPrefix &
-                    pairConn
-
-                result &= pairPrefix & "pair\n"
-
-                let pairChildPrefix = childPrefix &
-                    (if pairLast: "    " else: "│   ")
-
-                result &= treeRepr(pair.key, pairChildPrefix, false)
-                result &= treeRepr(pair.value, pairChildPrefix, true)
-
-        of NodeKind.identifier:
-            result = header & "identifier: " & node.name & "\n"
-
-        of NodeKind.functionCall:
-            result = header & "call\n"
-
-            let hasArgs = node.callArgs.len > 0
-
-            if node.callCallee != nil:
-                result &= treeRepr(
-                    node.callCallee,
-                    childPrefix,
-                    not hasArgs
-                )
-
-            result &= children(node.callArgs)
-
-        of NodeKind.memberAccess:
-            result = header & "access\n"
-            result &= treeRepr(node.accessObj, childPrefix, false)
-            result &= treeRepr(node.accessMember, childPrefix, true)
-
-        of NodeKind.expressionStatement:
-            result = header & "exprStmt\n"
-            result &= treeRepr(node.expression, childPrefix, true)
-
-        of NodeKind.unaryOp:
-            result = header &
-                "unary " &
-                (if node.unaryPrefix: "prefix" else: "postfix") &
-                ": " &
-                $node.unaryOperator &
-                "\n"
-
-            result &= treeRepr(
-                node.unaryOperand,
-                childPrefix,
-                true
-            )
-
-        of NodeKind.binaryOp:
-            result = header &
-                "binary: " &
-                $node.binaryOperator &
-                "\n"
-
-            result &= treeRepr(
-                node.binaryLeft,
-                childPrefix,
-                false
-            )
-
-            result &= treeRepr(
-                node.binaryRight,
-                childPrefix,
-                true
-            )
-
-        of NodeKind.lambda:
-            result = header & "lambda\n"
-
-            let paramCount = node.lambdaParams.len
-            let hasHint = node.lambdaHint != nil
-            let bodyCount = node.lambdaBody.len
-
-            var total = paramCount + (if hasHint: 1 else: 0) + bodyCount
-            var index = 0
-
-            for param in node.lambdaParams:
-                index.inc
-                result &= treeRepr(
-                    param,
-                    childPrefix,
-                    index == total
-                )
-
-            if hasHint:
-                index.inc
-                result &= treeRepr(
-                    node.lambdaHint,
-                    childPrefix,
-                    index == total
-                )
-
-            for body in node.lambdaBody:
-                index.inc
-                result &= treeRepr(
-                    body,
-                    childPrefix,
-                    index == total
-                )
-
-        of NodeKind.return:
-            result = header & "return\n"
-
-            if node.returnValue != nil:
-                result &= treeRepr(
-                    node.returnValue,
-                    childPrefix,
-                    true
-                )
-
-        of NodeKind.throw:
-            result = header & "throw\n"
-            result &= treeRepr(
-                node.throwException,
-                childPrefix,
-                true
-            )
-
-        of NodeKind.using:
-            result = header & "using\n"
-
-            for i, module in node.usingModules:
-                let last = i == node.usingModules.high
-
-                result &= childPrefix &
-                    (if last: "└── " else: "├── ") &
-                    module.module
-
-                if module.alias != "":
-                    result &= " as " & module.alias
-
-                result &= "\n"
-
-        of NodeKind.importFrom:
-            result = header &
-                "import from: " &
-                node.importModule &
-                "\n"
-
-            for i, name in node.importNames:
-                result &= childPrefix &
-                    (if i == node.importNames.high: "└── " else: "├── ") &
-                    name &
-                    "\n"
-
-        of NodeKind.ifStatement:
-            result = header & "if\n"
-
-            let branchCount = node.ifBranches.len
-            let hasElse = node.ifElseBody.len > 0
-            let totalBranches = branchCount + (if hasElse: 1 else: 0)
-
-            for i, branch in node.ifBranches:
-                let branchLast = i == totalBranches - 1
-                let branchConn = if branchLast: "└── " else: "├── "
-                let branchPrefix = childPrefix &
-                    branchConn
-
-                result &= branchPrefix & "branch\n"
-
-                let branchChildPrefix = childPrefix &
-                    (if branchLast: "    " else: "│   ")
-
-                result &= treeRepr(
-                    branch.condition,
-                    branchChildPrefix,
-                    branch.body.len == 0
-                )
-
-                for j, stmt in branch.body:
-                    result &= treeRepr(
-                        stmt,
-                        branchChildPrefix,
-                        j == branch.body.high
-                    )
-
-            if hasElse:
-                result &= childPrefix & "└── else\n"
-
-                for i, stmt in node.ifElseBody:
-                    result &= treeRepr(
-                        stmt,
-                        childPrefix & "    ",
-                        i == node.ifElseBody.high
-                    )
-
-        of NodeKind.whileLoop:
-            result = header & "while\n"
-
-            let hasBody = node.whileBody.len > 0
-
-            result &= treeRepr(
-                node.whileCondition,
-                childPrefix,
-                not hasBody
-            )
-
-            result &= children(node.whileBody)
-
-        of NodeKind.forLoop:
-            result = header & "for\n"
-
-            result &= treeRepr(
-                node.forVariable,
-                childPrefix,
-                false
-            )
-
-            result &= treeRepr(
-                node.forCollection,
-                childPrefix,
-                node.forBody.len == 0
-            )
-
-            result &= children(node.forBody)
-
-        of NodeKind.watchStatement:
-            result = header & "watch\n"
-
-            result &= treeRepr(
-                node.watchTarget,
-                childPrefix,
-                node.watchBody.len == 0
-            )
-
-            result &= children(node.watchBody)
-
-        of NodeKind.assign:
-            result = header &
-                "assign: " &
-                $node.assignOperator &
-                "\n"
-
-            result &= treeRepr(
-                node.assignVariable,
-                childPrefix,
-                false
-            )
-
-            result &= treeRepr(
-                node.assignValue,
-                childPrefix,
-                true
-            )
-
-        of NodeKind.functionDeclaration:
-            result = header &
-                "func: " &
-                node.funcName.name &
-                "\n"
-
-            let hasReturn = node.funcReturnKind != nil
-            let paramCount = node.funcParams.len
-            let hasBody = node.funcBody.len > 0
-            let total = paramCount +
-                (if hasReturn: 1 else: 0) +
-                node.funcBody.len
-
-            var index = 0
-
-            for param in node.funcParams:
-                index.inc
-                result &= treeRepr(
-                    param,
-                    childPrefix,
-                    index == total
-                )
-
-            if hasReturn:
-                index.inc
-                result &= treeRepr(
-                    node.funcReturnKind,
-                    childPrefix,
-                    index == total
-                )
-
-            for stmt in node.funcBody:
-                index.inc
-                result &= treeRepr(
-                    stmt,
-                    childPrefix,
-                    index == total
-                )
-
-        of NodeKind.matchStatement:
-            result = header & "match\n"
-
-            let hasCases = node.matchCases.len > 0
-
-            result &= treeRepr(
-                node.matchExpression,
-                childPrefix,
-                not hasCases
-            )
-
-            for i, c in node.matchCases:
-                let caseLast = i == node.matchCases.high
-                let caseConn = if caseLast: "└── " else: "├── "
-                let casePrefix = childPrefix & caseConn
-
-                result &= casePrefix & "case\n"
-
-                let caseChildPrefix = childPrefix &
-                    (if caseLast: "    " else: "│   ")
-
-                let hasGuard = c.guard != nil
-                let hasBody = c.body.len > 0
-
-                for j, pattern in c.patterns:
-                    let patternLast =
-                        j == c.patterns.high and
-                        not hasGuard and
-                        not hasBody
-
-                    result &= treeRepr(
-                        pattern,
-                        caseChildPrefix,
-                        patternLast
-                    )
-
-                if hasGuard:
-                    result &= treeRepr(
-                        c.guard,
-                        caseChildPrefix,
-                        not hasBody
-                    )
-
-                for j, stmt in c.body:
-                    result &= treeRepr(
-                        stmt,
-                        caseChildPrefix,
-                        j == c.body.high
-                    )
-
-        of NodeKind.tryStatement:
-            result = header & "try\n"
-
-            let hasCatches = node.tryCatches.len > 0
-            let hasFinally = node.tryFinallyBody.len > 0
-
-            # try body
-            for i, stmt in node.tryBody:
-                let isLast =
-                    i == node.tryBody.high and
-                    not hasCatches and
-                    not hasFinally
-
-                result &= treeRepr(
-                    stmt,
-                    childPrefix,
-                    isLast
-                )
-
-            # catches
-            for i, c in node.tryCatches:
-                let catchLast =
-                    i == node.tryCatches.high and
-                    not hasFinally
-
-                let catchConn =
-                    if catchLast: "└── "
-                    else: "├── "
-
-                result &= childPrefix &
-                    catchConn &
-                    "catch"
-
-                if c.variable != nil:
-                    result &= ": " & c.variable.name
-
-                result &= "\n"
-
-                let catchPrefix =
-                    childPrefix &
-                    (if catchLast: "    " else: "│   ")
-
-                let hasKind = c.kind != nil
-
-                if hasKind:
-                    result &= treeRepr(
-                        c.kind,
-                        catchPrefix,
-                        c.body.len == 0
-                    )
-
-                for j, stmt in c.body:
-                    result &= treeRepr(
-                        stmt,
-                        catchPrefix,
-                        j == c.body.high
-                    )
-
-            # finally
-            if hasFinally:
-                result &= childPrefix & "└── finally\n"
-
-                for i, stmt in node.tryFinallyBody:
-                    result &= treeRepr(
-                        stmt,
-                        childPrefix & "    ",
-                        i == node.tryFinallyBody.high
-                    )
-
-        of NodeKind.classDeclaration:
-            result = header & "class"
-
-            if node.className != nil:
-                result &= ": " & node.className.name
-
-            result &= "\n"
-
-            let hasParent = node.classParent != nil
-
-            if hasParent:
-                let hasMore =
-                    node.classFields.len > 0 or
-                    node.classMethods.len > 0 or
-                    node.classWatchers.len > 0 or
-                    node.classDerivatives.len > 0
-
-                result &= treeRepr(
-                    node.classParent,
-                    childPrefix,
-                    not hasMore
-                )
-
-            let total =
-                node.classFields.len +
-                node.classMethods.len +
-                node.classWatchers.len +
-                node.classDerivatives.len
-
-            var index = 0
-
-            for field in node.classFields:
-                index.inc
-                result &= treeRepr(
-                    field,
-                    childPrefix,
-                    index == total
-                )
-
-            for `method` in node.classMethods:
-                index.inc
-                result &= treeRepr(
-                    `method`,
-                    childPrefix,
-                    index == total
-                )
-
-            for watcher in node.classWatchers:
-                index.inc
-                result &= treeRepr(
-                    watcher,
-                    childPrefix,
-                    index == total
-                )
-
-            for derivative in node.classDerivatives:
-                index.inc
-                result &= treeRepr(
-                    derivative,
-                    childPrefix,
-                    index == total
-                )
-
-        of NodeKind.indexAccess:
-            result = header & "index\n"
-
-            result &= treeRepr(
-                node.indexObj,
-                childPrefix,
-                false
-            )
-
-            result &= treeRepr(
-                node.indexMember,
-                childPrefix,
-                true
-            )
-
-        of NodeKind.slice:
-            result = header & "slice\n"
-
-            let hasStart = node.sliceStart != nil
-            let hasStop = node.sliceStop != nil
-            let hasStep = node.sliceStep != nil
-
-            let showStart = hasStart or hasStop or hasStep   # real or <empty start>
-            let showStop = hasStop or hasStep                # real or <empty stop>
-
-            let total = 1 + ord(showStart) + ord(showStop) + ord(hasStep)
-            var index = 0
-
-            index.inc
-            result &= treeRepr(node.sliceObj, childPrefix, index == total)
-
-            if showStart:
-                index.inc
-                result &= (if hasStart: treeRepr(node.sliceStart, childPrefix, index == total)
-                           else: leaf("<empty start>", index == total))
-
-            if showStop:
-                index.inc
-                result &= (if hasStop: treeRepr(node.sliceStop, childPrefix, index == total)
-                           else: leaf("<empty stop>", index == total))
-
-            if hasStep:
-                index.inc
-                result &= treeRepr(node.sliceStep, childPrefix, true)
-
-        of NodeKind.ternaryIf:
-            result = header & "ternary\n"
-
-            result &= treeRepr(
-                node.ternaryCondition,
-                childPrefix,
-                false
-            )
-
-            result &= treeRepr(
-                node.ternaryTrue,
-                childPrefix,
-                false
-            )
-
-            result &= treeRepr(
-                node.ternaryFalse,
-                childPrefix,
-                true
-            )
-
-        of NodeKind.comprehension:
-            result = header & "comprehension\n"
-
-            result &= treeRepr(
-                node.comprehensionExpr,
-                childPrefix,
-                false
-            )
-
-            for i, v in node.comprehensionVars:
-                result &= treeRepr(
-                    v,
-                    childPrefix,
-                    i == node.comprehensionVars.high and
-                    node.comprehensionCondition == nil
-                )
-
-            let hasCondition = node.comprehensionCondition != nil
-
-            result &= treeRepr(
-                node.comprehensionCollection,
-                childPrefix,
-                not hasCondition
-            )
-
-            if hasCondition:
-                result &= treeRepr(
-                    node.comprehensionCondition,
-                    childPrefix,
-                    true
-                )
-
-        of NodeKind.declarativeObject:
-            result = header & "object\n"
-
-            let total =
-                node.objFields.len +
-                node.objChildren.len
-
-            var index = 0
-
-            for field in node.objFields:
-                index.inc
-
-                let fieldLast = index == total
-                let fieldConn =
-                    if fieldLast: "└── "
-                    else: "├── "
-
-                result &= childPrefix &
-                    fieldConn &
-                    "field\n"
-
-                let fieldPrefix =
-                    childPrefix &
-                    (if fieldLast: "    " else: "│   ")
-
-                result &= treeRepr(
-                    field.name,
-                    fieldPrefix,
-                    false
-                )
-
-                result &= treeRepr(
-                    field.value,
-                    fieldPrefix,
-                    true
-                )
-
-            for childNode in node.objChildren:
-                index.inc
-
-                result &= treeRepr(
-                    childNode,
-                    childPrefix,
-                    index == total
-                )
-
-        of NodeKind.typeOptional:
-            result = header & "optional\n"
-            result &= treeRepr(
-                node.optionalKind,
-                childPrefix,
-                true
-            )
-
-        of NodeKind.typeUnion:
-            result = header & "union\n"
-            result &= children(node.unionKinds)
-
-        of NodeKind.genericType:
-            result = header & "generic\n"
-
-            result &= treeRepr(
-                node.genericKind,
-                childPrefix,
-                node.typeArgs.len == 0
-            )
-
-            result &= children(node.typeArgs)
-
-        of NodeKind.setLiteral:
-            result = header & "set\n"
-            result &= children(node.setItems)
-
-        of NodeKind.tupleLiteral:
-            result = header & "tuple\n"
-            result &= children(node.tupleItems)
-
-        of NodeKind.template:
-            result = header & "template\n"
-            result &= children(node.parts)
-
-        of NodeKind.break:
-            result = header & "break\n"
-
-        of NodeKind.continue:
-            result = header & "continue\n"
-
-        of NodeKind.null:
-            result = header & "null\n"
+    render(toTree(node, TreeCtx(showSpans: showSpans)), prefix, isLast, result)
 
 proc `$`*(node: Node): string =
     treeRepr(node, "", true)
@@ -999,6 +463,11 @@ proc `$`*(program: Program): string =
     result = "program\n"
     for i, node in program.statements:
         result &= treeRepr(node, "", i == program.statements.high)
+
+proc tree*(program: Program, showSpans = false): string =
+    result = "program\n"
+    for i, node in program.statements:
+        result &= treeRepr(node, "", i == program.statements.high, showSpans)
 
 macro node*(startToken, endToken, nodeKind: untyped, args: varargs[untyped]): untyped =
     ## Constructs a Node, deriving positional metadata from two tokens.

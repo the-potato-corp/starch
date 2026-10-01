@@ -35,7 +35,7 @@ proc main(): void =
         let tk = l.lex()
         discard newParser(tk, filename, content, l.lines).parse()
 
-    const iterations = 5000
+    const iterations = 1000
     var lexTotal, parseTotal: int64
     var tokenCheck = 0  # consumes results so the loop can't be optimized away
 

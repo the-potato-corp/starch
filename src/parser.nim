@@ -500,7 +500,8 @@ proc parse_call_or_access(self: Parser): Node =
             of TokenType.dot:
                 # Member access
                 discard self.advance()
-                let member = self.parse_expression()
+                let ident = self.expect(TokenType.ident)
+                let member = node(ident, ident, NodeKind.identifier, name = ident.value.strVal)
                 expression = node(start, self.peek(-1), NodeKind.memberAccess, accessObj = expression, accessMember = member)
             else:
                 return expression
