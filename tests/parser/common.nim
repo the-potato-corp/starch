@@ -6,7 +6,7 @@ import ../../src/tokens
 import ../../src/parser
 import ../../src/nodes
 
-proc sexpr(node: Node): string =
+proc sexpr*(node: Node): string =
     if node.isNil():
         return "_"
 
