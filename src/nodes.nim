@@ -192,35 +192,77 @@ type
         statements*: seq[Node]
         comments*: seq[Token] # dumping ground for comments to use later
 
+    Entry = object
+        ## A tree entry, for serialisation only
+        label: string
+        isNode: bool
+        node: Node
+        value: string
+
 # ast -> tree
-proc toTree(node: Node, prefix: string = "", isLast: bool = true, label: string = "root"): string =
-    let connector = if isLast: "└── " else: "├── "
-    let next_prefix = prefix & (if isLast: "    " else: "│   ")
-    var count = 0
+proc firstTokenAt(tokens: seq[Token], pos: int): int =
+    ## Binary search to find the index of the first token starting at or after pos
+    var low = 0
+    var high = tokens.len
+    while low < high:
+        let mid = (low + high) div 2
+        if tokens[mid].pos < pos: low = mid + 1
+        else: high = mid
+    return low
 
-    if node == nil:
-      return prefix & connector & label & ": nil\n"
-    result &= prefix & connector & label & "\n"
+proc spanText(node: Node, tokens: seq[Token]): string =
+    ## Inclusive span, in the format [1..3].
+    let first = firstTokenAt(tokens, node.pos)
+    let last = max(first, firstTokenAt(tokens, node.pos + max(node.length, 1)) - 1)
+    "[" & $first & ".." & $last & "]"
 
-    for fieldName, fieldValue in node[].fieldPairs: # fieldPairs and everything in this loop is compiletime
-        when fieldName notin ["kind", "pos", "length"]: count.inc
+proc leaf(label: string, value: string): Entry =
+    Entry(label: label, value: value)
 
+proc child(label: string, n: Node): Entry =
+    Entry(label: label, isNode: true, node: n)
+
+proc collect(node: Node): seq[Entry] =
     for fieldName, fieldValue in node[].fieldPairs:
-        when fieldName notin ["kind", "pos", "length"]:
-            count.dec # weird way to do it but this is what i thought of
-
+        when fieldName notin ["kind", "pos", "length"]:    # kind is printed in the header instead
             when fieldValue is Node:
-                result &= toTree(fieldValue, nextPrefix, count == 0, fieldName)
-            elif fieldValue is int | float | string:
-                let childConnector = if count == 0: "└── " else: "├── "
-                result &= nextPrefix & childConnector & fieldName & ": " & $fieldValue & "\n"
+                result.add child(fieldName, fieldValue)
+            elif fieldValue is seq[Node]:
+                for i, n in fieldValue:
+                    result.add child(fieldName & "[" & $i & "]", n)
+            elif fieldValue is int | float | string | bool | enum:
+                result.add leaf(fieldName, $fieldValue)
+            elif fieldValue is seq[string]:
+                result.add leaf(fieldName, $fieldValue)
+
+proc toTree(node: Node, prefix = "", isLast = true, label = "root", showSpans = false, tokens: seq[Token] = @[]): string =
+    let connector = if isLast: "└── " else: "├── "
+    if node == nil:
+        return prefix & connector & label & ": nil\n"
+
+    result = prefix & connector & label
+    if label != $node.kind:
+        result &= " (" & $node.kind & ")"
+    if showSpans:
+        result &= " " & spanText(node, tokens)
+    result &= "\n"
+
+    let childPrefix = prefix & (if isLast: "    " else: "│   ")
+    let items = collect(node)
+    for i, e in items:
+        let last = i == items.high
+        if e.isNode:
+            result &= toTree(e.node, childPrefix, last, e.label, showSpans, tokens)
+        else:
+            let c = if last: "└── " else: "├── "
+            result &= childPrefix & c & e.label & ": " & e.value & "\n"
 
 # entry points
 proc treeRepr*(node: Node, prefix: string, isLast: bool, showSpans = false, tokens: seq[Token] = @[]): string =
-    ## Represent the AST in a clean ASCII-style string.
+    ## Represent an AST node in a clean ASCII-style string.
 
     if node == nil: return ""
-    return toTree(node, prefix, isLast, $node.kind)
+    return toTree(node, prefix, isLast, $node.kind, showSpans, tokens)
 
 proc `$`*(node: Node): string =
     treeRepr(node, "", true)
@@ -231,15 +273,15 @@ proc `$`*(program: Program): string =
         result &= treeRepr(node, "", i == program.statements.high)
 
 proc tree*(program: Program, showSpans = false, tokens: seq[Token] = @[]): string =
+    ## Represent the AST in a clean ASCII-style string.
     result = "program\n"
     for i, node in program.statements:
         result &= treeRepr(node, "", i == program.statements.high, showSpans, tokens)
 
 macro node*(startToken, endToken, nodeKind: untyped, args: varargs[untyped]): untyped =
     ## Constructs a Node, deriving positional metadata from two tokens.
-    ## `startToken` is the first token of the node; `endToken` is the last consumed token.
-    ## The span is (endToken.pos + endToken.length) - startToken.pos, which correctly
-    ## yields startToken.length when both arguments are the same token.
+    ## startToken is the first token of the node; endToken is the last consumed token.
+    ## The span is (endToken.pos + endToken.length) - startToken.pos
     let objConstr = newNimNode(nnkObjConstr)
     objConstr.add(ident("Node"))
 
@@ -248,7 +290,6 @@ macro node*(startToken, endToken, nodeKind: untyped, args: varargs[untyped]): un
 
     # (endToken.pos + endToken.length) - startToken.pos
     # = byte span from the first character of startToken to the last character of endToken.
-    # When startToken IS endToken this reduces to startToken.length (never zero).
     let endPos = newTree(nnkInfix, ident("+"),
         newDotExpr(endToken, ident("pos")),
         newDotExpr(endToken, ident("length"))

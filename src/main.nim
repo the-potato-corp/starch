@@ -19,14 +19,15 @@ proc main(): void =
     # Lex the file
     let content = filename.readFile()
     let lexer = newLexer(content, filename)
-    for t in lexer.lex():
+    let tokens = lexer.lex()
+    for t in tokens:
         echo $t
 
     # Parse the file
     echo "----"
     let parser = newParser(lexer.tokens, filename, content, lexer.lines)
     let ast = parser.parse()
-    echo $ast
+    echo ast.tree(true, tokens)
     # for node in ast.statements:
     #     echo sexpr(node)
 
