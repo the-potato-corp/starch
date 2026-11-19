@@ -4,6 +4,7 @@ import std/times
 import std/strformat
 import errors
 import lexer
+import nodes
 import ../tests/parser/common
 import parser
 import tokens
@@ -25,8 +26,9 @@ proc main(): void =
     echo "----"
     let parser = newParser(lexer.tokens, filename, content, lexer.lines)
     let ast = parser.parse()
-    for node in ast.statements:
-        echo sexpr(node)
+    echo $ast
+    # for node in ast.statements:
+    #     echo sexpr(node)
 
 when isMainModule:
     try:
