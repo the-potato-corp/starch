@@ -27,7 +27,8 @@ proc main(): void =
     echo "----"
     let parser = newParser(lexer.tokens, filename, content, lexer.lines)
     let ast = parser.parse()
-    echo ast.tree(true, tokens)
+    echo $ast
+    # echo ast.tree(true, tokens)
     # for node in ast.statements:
     #     echo sexpr(node)
 

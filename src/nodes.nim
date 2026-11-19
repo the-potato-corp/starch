@@ -1,4 +1,5 @@
 import std/macros
+import std/sequtils
 import std/strutils
 import lexer
 import tokens
@@ -216,22 +217,66 @@ proc spanText(node: Node, tokens: seq[Token]): string =
     let last = max(first, firstTokenAt(tokens, node.pos + max(node.length, 1)) - 1)
     "[" & $first & ".." & $last & "]"
 
-proc leaf(label: string, value: string): Entry =
-    Entry(label: label, value: value)
+proc leaf(label, value: string): Entry =
+    Entry(label: label, value: value.multiReplace(("\n", "\\n"), ("\t", "\\t"), ("\r", "\\r")))
 
 proc child(label: string, n: Node): Entry =
     Entry(label: label, isNode: true, node: n)
 
 proc collect(node: Node): seq[Entry] =
     for fieldName, fieldValue in node[].fieldPairs:
-        when fieldName notin ["kind", "pos", "length"]:    # kind is printed in the header instead
+        when fieldName notin ["kind", "pos", "length"]:
             when fieldValue is Node:
                 result.add child(fieldName, fieldValue)
+
             elif fieldValue is seq[Node]:
                 for i, n in fieldValue:
                     result.add child(fieldName & "[" & $i & "]", n)
+
+            elif fieldValue is seq[tuple[key: Node, value: Node]]:
+                for i, p in fieldValue:
+                    let base = fieldName & "[" & $i & "]"
+                    result.add child(base & ".key", p.key)
+                    result.add child(base & ".value", p.value)
+
+            elif fieldValue is seq[tuple[name: Node, value: Node]]:
+                for i, p in fieldValue:
+                    let base = fieldName & "[" & $i & "]"
+                    result.add child(base & ".name", p.name)
+                    result.add child(base & ".value", p.value)
+
+            elif fieldValue is seq[tuple[module: string, alias: string]]:
+                for i, m in fieldValue:
+                    let alias = if m.alias == "": "" else: " as " & m.alias
+                    result.add leaf(fieldName & "[" & $i & "]", m.module & alias)
+
+            elif fieldValue is seq[tuple[condition: Node, body: seq[Node]]]:
+                for i, b in fieldValue:
+                    let base = fieldName & "[" & $i & "]"
+                    result.add child(base & ".condition", b.condition)
+                    for j, n in b.body:
+                        result.add child(base & ".body[" & $j & "]", n)
+
+            elif fieldValue is seq[tuple[patterns: seq[Node], guard: Node, body: seq[Node]]]:
+                for i, c in fieldValue:
+                    let base = fieldName & "[" & $i & "]"
+                    for j, n in c.patterns:
+                        result.add child(base & ".patterns[" & $j & "]", n)
+                    result.add child(base & ".guard", c.guard)
+                    for j, n in c.body:
+                        result.add child(base & ".body[" & $j & "]", n)
+
+            elif fieldValue is seq[tuple[kind: Node, variable: Node, body: seq[Node]]]:
+                for i, c in fieldValue:
+                    let base = fieldName & "[" & $i & "]"
+                    result.add child(base & ".kind", c.kind)
+                    result.add child(base & ".variable", c.variable)
+                    for j, n in c.body:
+                        result.add child(base & ".body[" & $j & "]", n)
+
             elif fieldValue is int | float | string | bool | enum:
                 result.add leaf(fieldName, $fieldValue)
+
             elif fieldValue is seq[string]:
                 result.add leaf(fieldName, $fieldValue)
 
@@ -240,17 +285,23 @@ proc toTree(node: Node, prefix = "", isLast = true, label = "root", showSpans = 
     if node == nil:
         return prefix & connector & label & ": nil\n"
 
-    result = prefix & connector & label
+    var header = prefix & connector & label
     if label != $node.kind:
-        result &= " (" & $node.kind & ")"
+        header &= " (" & $node.kind & ")"
     if showSpans:
-        result &= " " & spanText(node, tokens)
-    result &= "\n"
+        header &= " " & spanText(node, tokens)
 
+    let entries = collect(node).filterIt(not (it.isNode and it.node == nil))
+
+    if entries.allIt(not it.isNode):
+        if entries.len == 0:
+            return header & "\n"
+        return header & " " & entries.mapIt(it.label & ": " & it.value).join(", ") & "\n"
+
+    result = header & "\n"
     let childPrefix = prefix & (if isLast: "    " else: "│   ")
-    let items = collect(node)
-    for i, e in items:
-        let last = i == items.high
+    for i, e in entries:
+        let last = i == entries.high
         if e.isNode:
             result &= toTree(e.node, childPrefix, last, e.label, showSpans, tokens)
         else:
